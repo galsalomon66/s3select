@@ -36,7 +36,8 @@ I created a container (sudo docker run -it galsl/boost:latest /bin/bash/) built 
 -q flag is for the query.
 
 the engine supporting the following arithmetical operations +,-,*,/,^ , ( ) , and also the logical operators and,or.
-s3select is supporting float,decimal,string; it also supports aggregation functions such as max,min,sum,count.
+
+s3select is supporting float,decimal,string; it also supports aggregation functions such as max,min,sum,count; the input stream is accepted as string attributes, to operate arithmetical operation it need to CAST, i.e. int(_1) is converting text to integer.
 
 The demo-app is producing CSV format , thus it can be piped into another s3select statement.
 
