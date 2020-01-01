@@ -13,6 +13,33 @@ using namespace BOOST_SPIRIT_CLASSIC_NS;
 
 /// AST builder
 
+class s3select_projections {
+
+    private:
+        list<base_statement *> m_projections;
+    
+    public:
+        bool is_aggregate()
+        {
+            //TODO iterate on projections , and search for aggregate
+            for(auto p : m_projections)
+                {
+                    
+                }
+        }
+
+        bool semantic()
+        {
+            //TODO check aggragtion function are not nested 
+        }
+
+        list<base_statement *> * get()
+        {
+            return &m_projections;
+        }
+
+};
+
 struct actionQ
 {
 
@@ -25,9 +52,8 @@ struct actionQ
     list<base_statement *> condQ;
     std::string from_clause;
     list<std::string> schema_columns;
-    list<base_statement *> projections;
+    s3select_projections  projections;
 
-    void clear() {} //TBD clear all Q's between different queries;
 };
 
 class base_action
@@ -51,23 +77,54 @@ struct push_from_clause : public base_action
 
 struct push_number : public base_action //TODO use define for defintion of actions
 {
-    int number;
-
     void operator()(const char *a, const char *b) const
     {
         string token(a, b);
-        variable *v = new variable(atoi(token.c_str()));
+        variable *v = new variable(atoi(token.c_str())); //TODO strtoll
 
         m_action->exprQ.push_back(v);
     }
 
 } g_push_number;
 
+struct push_float_number : public base_action //TODO use define for defintion of actions
+{
+
+    void operator()(const char *a, const char *b) const
+    {
+        string token(a, b);
+        char *perr;
+        double d = strtod(token.c_str(),&perr);
+        variable *v = new variable(d);
+
+        //TODO parse again check if decimal number
+        m_action->exprQ.push_back(v);
+    }
+
+} g_push_float_number;
+
+struct push_string : public base_action //TODO use define for defintion of actions
+{
+
+    void operator()(const char *a, const char *b) const
+    {
+        a++;b--;// remove double quotes
+        string token(a, b);
+        
+        //strdup allocation should release only at the end of query-execution (class{runtime_allocator} not accessing those allocationr) 
+        variable *v = new variable(strdup( token.c_str() ),variable::var_t::COL_VALUE);
+
+        m_action->exprQ.push_back(v);
+    }
+
+} g_push_string;
+
 struct push_variable : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
         string token(a, b);
+
         variable *v = new variable(token.c_str());
 
         m_action->exprQ.push_back(v);
@@ -141,6 +198,8 @@ struct push_function_arg : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
+        std::string token(a,b);
+
         base_statement *be = m_action->exprQ.back();
         m_action->exprQ.pop_back();
         base_statement *f = m_action->funcQ.back();
@@ -154,9 +213,11 @@ struct push_function_name : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
-        std::string token(a, b);
+        b--;while(*b=='(' || *b == ' ')b--;//point to function-name
 
-        __function *func = new __function(token.c_str());
+        std::string fn;fn.assign(a,b-a+1);
+
+        __function *func = new __function(fn.c_str());
 
         m_action->funcQ.push_back(func);
     }
@@ -166,6 +227,8 @@ struct push_function_expr : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
+        std::string token(a,b);
+
         base_statement *func = m_action->funcQ.back();
         m_action->funcQ.pop_back();
 
@@ -273,6 +336,7 @@ struct push_column_pos : public base_action
     void operator()(const char *a,const char *b) const
     {
         string token(a, b);
+
         variable *v = new variable(token.c_str() , variable::var_t::POS );
 
         m_action->exprQ.push_back(v);
@@ -286,11 +350,12 @@ struct push_projection : public base_action
     {
         string token(a, b);
 
-        m_action->projections.push_back( m_action->exprQ.back() );
+        m_action->projections.get()->push_back( m_action->exprQ.back() );
         m_action->exprQ.pop_back();
     }
 
 } g_push_projection;
+
 
 /// for the schema description "mini-parser"
 struct push_column : public base_action
@@ -304,6 +369,16 @@ struct push_column : public base_action
     }
 
 } g_push_column;
+
+struct push_debug_1 : public base_action
+{
+
+    void operator()(const char *a,const char *b) const
+    {
+        std::string token(a,b);
+    }
+
+} g_push_debug_1;
 
 struct s3select : public grammar<s3select>
 {
@@ -333,10 +408,12 @@ struct s3select : public grammar<s3select>
         ATTACH_ACTION_Q(push_function_arg);
         ATTACH_ACTION_Q(push_function_name);
         ATTACH_ACTION_Q(push_function_expr);
-        ATTACH_ACTION_Q(push_number);
+        ATTACH_ACTION_Q(push_float_number);
+        ATTACH_ACTION_Q(push_string);
         ATTACH_ACTION_Q(push_variable);
         ATTACH_ACTION_Q(push_column_pos);
         ATTACH_ACTION_Q(push_projection);
+        ATTACH_ACTION_Q(push_debug_1);
 
     }
 
@@ -366,12 +443,42 @@ struct s3select : public grammar<s3select>
 
     std::list<base_statement*>  get_projections_list()
     {
-        return m_actionQ.projections; //TODO return COPY(?) or to return evalaution results (list of class value{})
+        return *m_actionQ.projections.get(); //TODO return COPY(?) or to return evalaution results (list of class value{}) / return reference(?)
     }
 
     scratch_area* get_scratch_area()
     {
         return &m_sca;
+    }
+
+    ~s3select()
+    {
+        if (m_actionQ.exprQ.empty() == false)
+        {
+            for (auto e : m_actionQ.exprQ)
+                if (e)
+                {
+                    e->dfs_del();
+                    delete e;
+                }
+        }
+
+        if (m_actionQ.condQ.empty() == false)
+        {
+            for (auto c : m_actionQ.condQ)
+                if (c)
+                {
+                    c->dfs_del();
+                    delete c;
+                }
+        }
+
+        for (auto p : get_projections_list())
+            if (p)
+            {
+                p->dfs_del();
+                delete p;
+            }
     }
 
     template <typename ScannerT>
@@ -411,12 +518,18 @@ struct s3select : public grammar<s3select>
 
             list_of_function_arguments = (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)] >> *(',' >> (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)]) ;
 
-            function = variable[BOOST_BIND_ACTION(push_function_name)] >> ( '(' >> list_of_function_arguments >> ')' ) [BOOST_BIND_ACTION(push_function_expr)];
+            function =( (variable >>  '(' )[BOOST_BIND_ACTION(push_function_name)]   >> list_of_function_arguments >> ')' ) [BOOST_BIND_ACTION(push_function_expr)];
             
-            arithmetic_argument = (number)[BOOST_BIND_ACTION(push_number)] | (column_pos)[BOOST_BIND_ACTION(push_column_pos)] | (function)| (variable)[BOOST_BIND_ACTION(push_variable)];//function is pushed by right-term 
+            arithmetic_argument = (float_number)[BOOST_BIND_ACTION(push_float_number)] |  (number)[BOOST_BIND_ACTION(push_number)] | (column_pos)[BOOST_BIND_ACTION(push_column_pos)] | 
+                                (string)[BOOST_BIND_ACTION(push_string)] |
+                                (function)[BOOST_BIND_ACTION(push_debug_1)]  | (variable)[BOOST_BIND_ACTION(push_variable)] ;//function is pushed by right-term 
 
                        
-            number = int_p; //TODO float , string 
+            number = int_p;
+
+            float_number = real_p;
+
+            string = str_p("\"") >> *( anychar_p - str_p("\"") ) >> str_p("\"") ;
 
             column_pos = ('_'>>+(digit_p) ) ;
 
@@ -433,7 +546,7 @@ struct s3select : public grammar<s3select>
         }
     
 
-        rule<ScannerT> variable, select_expr, s3_object, where_clause, number, arith_cmp, log_op, condition_expression, arithmetic_predicate, factor;
+        rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, arithmetic_predicate, factor;
         rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
         rule<ScannerT> fs_type,object_path;
         rule<ScannerT> projections,projection_expression,alias_name,column_pos;
