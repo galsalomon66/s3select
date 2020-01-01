@@ -25,19 +25,22 @@ I created a container (sudo docker run -it galsl/boost:latest /bin/bash/) built 
 **The demo can run on CSV files only, as follow. (folder s3select_demo)**
 * bash> s3select -q ‘select _1 +_2,_5 * 3 from /...some..full-path/csv.txt where _1 > _2;’
 
-* bash> cat /...some..full-path/csv.txt | S3select -q ‘select _1,_5 from stdin where _1 > _2;’
+* bash> cat /...some..full-path/csv.txt | s3select -q ‘select _1,_5 from stdin where _1 > _2;’
 
-* bash> cat /...some..full-path/csv.txt | S3select -q ‘select c1,c5 from stdin where c1 > c2;’ -s ‘c1,c2,c3,c4,c5’
+* bash> cat /...some..full-path/csv.txt | s3select -q ‘select c1,c5 from stdin where c1 > c2;’ -s ‘c1,c2,c3,c4,c5’
+
+* bash> cat /...some..full-path/csv.txt | s3select -q 'select min(int(substr(_1,1,1))) from  stdin where  substr(_1,1,1) ==  substr(_2,1,1);'
 
 -s flag is defining a schema (no type only names) , without schema each column can be accessed with _N (_1 is the first column).
 
 -q flag is for the query.
 
 the engine supporting the following arithmetical operations +,-,*,/,^ , ( ) , and also the logical operators and,or.
+s3select is supporting float,decimal,string; it also supports aggregation functions such as max,min,sum,count.
 
 The demo-app is producing CSV format , thus it can be piped into another s3select statement.
 
-there is a small app /generate_rand_csv {number-of-rows} {number-of-columns}/ , which generate CSV rows containing only numbers (s3select is currently working only on integers, later, it will handle float and string)
+there is a small app /generate_rand_csv {number-of-rows} {number-of-columns}/ , which generate CSV rows containing only numbers.
 
 the random numbers are produced with same seed number.
 
