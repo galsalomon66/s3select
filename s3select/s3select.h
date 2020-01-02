@@ -26,11 +26,13 @@ class s3select_projections {
                 {
                     
                 }
+	    return false;
         }
 
         bool semantic()
         {
             //TODO check aggragtion function are not nested 
+            return false;
         }
 
         list<base_statement *> * get()
@@ -421,7 +423,7 @@ struct s3select : public grammar<s3select>
     {
         base_statement * cond = m_actionQ.exprQ.back();
 
-        bool res = cond->semantic();
+        return  cond->semantic();
     }
     
     std::string get_from_clause()
@@ -531,7 +533,7 @@ struct s3select : public grammar<s3select>
 
             string = str_p("\"") >> *( anychar_p - str_p("\"") ) >> str_p("\"") ;
 
-            column_pos = ('_'>>+(digit_p) ) ;
+            column_pos = ('_'>>+(digit_p) ) | '*' ;
 
             muldiv_operator = str_p("*") | str_p("/") | str_p("^");// got precedense
 

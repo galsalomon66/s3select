@@ -204,6 +204,8 @@ public:
     {
         this->__val = o.__val;
         this->type = o.type;
+
+	return *this;
     }
 
     bool operator<(const value &v)//basic compare operator , most itensive runtime operation 
@@ -329,7 +331,7 @@ class base_statement :public runtime_allocator {
         virtual base_statement* right() {return 0;}       
 		virtual std::string print(int ident) =0;//TODO complete it, one option to use level parametr in interface , 
         virtual bool semantic() =0;//done once , post syntax , traverse all nodes and validate semantics. 
-        virtual bool traverse_and_apply(scratch_area *sa)
+        virtual void traverse_and_apply(scratch_area *sa)
         {
             m_scratch = sa;
             if (left())
@@ -339,7 +341,7 @@ class base_statement :public runtime_allocator {
         }
 
         //relase the AST , will be replace with dedicated allocator
-        virtual bool dfs_del(){if (left()) left()->dfs_del();if (right()) right()->dfs_del();if (left()) delete left();if (right()) delete right();}
+        virtual void dfs_del(){if (left()) left()->dfs_del();if (right()) right()->dfs_del();if (left()) delete left();if (right()) delete right();}
 
         virtual bool is_aggregate(){return false;}
         virtual bool is_column(){return false;}
@@ -445,9 +447,9 @@ public:
         return out;
     }
 
-    virtual bool semantic(){}
+    virtual bool semantic(){return false;}
 
-    virtual bool dfs_del(){}
+    virtual void dfs_del(){}
 
 };
 
@@ -470,10 +472,10 @@ class arithmetic_operand : public base_statement {
         virtual base_statement* left(){return l;}
         virtual base_statement* right(){return r;}
         
-		virtual std::string print(int ident){
+	virtual std::string print(int ident){
            std::string out = std::string(ident,' ') + "compare:" += std::to_string(_cmp) + "\n" + l->print(ident-5) +r->print(ident+5);
             return out;
-		}
+	}
         
         virtual value eval(){
 
@@ -504,7 +506,8 @@ class arithmetic_operand : public base_statement {
 					break;
 
 				default:
-					break;//TODO exception
+					throw base_s3select_exception("internal error");
+					break;
 			}
         }
 
@@ -599,6 +602,7 @@ class mulldiv_operation : public base_statement {
                 break;
 
             default:
+		throw base_s3select_exception("internal error");
                 break;
             }
         }
@@ -654,6 +658,8 @@ class addsub_operation : public base_statement  {
             {
                 return (l->eval() - r->eval());
             }
+	
+		return value();
         }
 };
 
@@ -995,7 +1001,7 @@ private:
     }
 
 public:
-    virtual bool traverse_and_apply(scratch_area *sa)
+    virtual void traverse_and_apply(scratch_area *sa)
     {
         m_scratch = sa;
         for (base_statement *ba : arguments)
@@ -1040,7 +1046,7 @@ public:
         return result.get_value();
     }
 
-    virtual bool dfs_del()
+    virtual void dfs_del()
     {
         for (auto ba : arguments)
         {
@@ -1049,7 +1055,7 @@ public:
         }
     }
 
-    virtual std::string  print(int ident) {}
+    virtual std::string  print(int ident) {return std::string(0);}
 
     void push_argument(base_statement *arg)
     {
