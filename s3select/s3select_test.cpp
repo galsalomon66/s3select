@@ -122,7 +122,8 @@ public:
         {
             do
             {
-                m_where_clause->traverse_and_release();
+		if (m_where_clause)
+                	m_where_clause->traverse_and_release();
 
                 number_of_tokens = getNextRow(row_tokens);
                 if (number_of_tokens < 0) //end of stream
@@ -148,7 +149,8 @@ public:
 
             do
             {
-                m_where_clause->traverse_and_release();
+		if(m_where_clause)
+                	m_where_clause->traverse_and_release();
 
                 number_of_tokens = getNextRow(row_tokens);
                 if (number_of_tokens < 0)
