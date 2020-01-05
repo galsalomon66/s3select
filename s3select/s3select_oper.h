@@ -24,41 +24,6 @@ class base_s3select_exception {
         virtual const char* what(){return _msg; }
 };
 
-class runtime_allocator {//TODO to replace with singletone allocator, using chunk allocation (not new/delete)
-//purpose: managing all allocation done on query-run-time (TODO add new/malloc)
-    private:
-        std::list<char*> ptr_list;
-
-    public:
-        char *strdup(const char *s)
-        {
-            char *p = ::strdup(s);
-
-            ptr_list.push_back( p );
-
-            return p;
-        }
-
-        char *strndup(const char *s, size_t n)
-        {
-            char *p = ::strndup(s,n);
-
-            ptr_list.push_back( p );
-
-            return p;
-        }
-
-        void release()
-        {
-            for(auto p : ptr_list)
-                {
-                    free(p); p = 0;
-                }
-    
-            ptr_list.clear();
-        }
-};
-
 class scratch_area
 {
 
@@ -86,6 +51,7 @@ public:
         {
             m_columns[i] = tokens[i];
         }
+        //TODO m_columns[i]=0;
     }
 
     int get_column_pos(const char *n)
@@ -108,6 +74,10 @@ public:
             throw base_s3select_exception("column_position_is_wrong"); 
 
         return m_columns[column_pos];
+    }
+
+    int get_num_of_columns(){
+        return m_upper_bound;
     }
 };
 
@@ -156,7 +126,7 @@ public:
         double dbl;
     } value_t;
 
-//private:
+//private://TODO must be private with getter's
     value_t __val;
 
 public:
@@ -305,7 +275,7 @@ public:
         return compute<binop_mult>(*this,v);
     }
 
-    value & operator/(const value &v)
+    value & operator/(const value &v) // TODO  handle division by zero
     {
         return compute<binop_div>(*this,v);
     }
@@ -317,7 +287,7 @@ public:
 
 };
 
-class base_statement :public runtime_allocator {
+class base_statement  {
 
     protected:
 
@@ -359,15 +329,6 @@ class base_statement :public runtime_allocator {
             if(right()) right()->set_last_call();
         }
 
-        virtual void traverse_and_release()
-        {
-            release();
-
-            if(left())
-                left()->traverse_and_release();
-            if(right())
-                right()->traverse_and_release();
-        }
 };
 
 class variable : public base_statement
@@ -379,13 +340,15 @@ private:
     int column_pos;
     value var_value;
 
+    std::string m_star_op_result;
 public:
 
     typedef enum
     {
         VAR,//schema column (i.e. age , price , ...)
         COL_VALUE, //concrete value
-        POS // CSV column number  (i.e. _1 , _2 ... )
+        POS, // CSV column number  (i.e. _1 , _2 ... )
+        STAR_OPERATION, //'*'
     } var_t; 
     var_t m_var_type;
     
@@ -413,14 +376,21 @@ public:
             m_var_type = tp;
             column_pos = -1;
             var_value.__val.str = n;
-
             var_value.type = value::value_En_t::STRING;
+
+        }else if (tp ==variable::var_t::STAR_OPERATION)
+        {
+            _name = "#";
+            m_var_type = tp;
+            column_pos = -1;
+            var_value.__val.str = 0;
+            var_value.type = value::value_En_t::STRING;//TODO NA??
         }
     }
 
     virtual ~variable(){}
 
-    virtual bool is_column() {//does query has a reference to column.
+    virtual bool is_column() {//is reference to column.
             if(m_var_type == VAR || m_var_type == POS) return true;
             return false;
     }
@@ -431,10 +401,27 @@ public:
     void _set(int64_t i) {var_value.__val.num = i;}
     void _set(value  i) {var_value = i;}
 
+    const char * star_operation(){ //purpose return content of all columns in a input stream
+
+        m_star_op_result.clear();
+
+	int i;
+        int num_of_columns = m_scratch->get_num_of_columns();
+        for(i=0;i<num_of_columns-1;i++)
+        {
+            m_star_op_result += std::string(m_scratch->get_column_value(i)) + ',' ;
+        }
+        m_star_op_result += std::string(m_scratch->get_column_value(i)) ;
+
+        return m_star_op_result.c_str();
+    }
+
     virtual value eval()
     {
         if (m_var_type == COL_VALUE) //return value
-            return var_value;           // could be deciml / float / string comming from query
+            return var_value;           // could be deciml / float / string ; comes from stream
+        else if(m_var_type == STAR_OPERATION)
+            return star_operation();
         else if (column_pos == -1)
             column_pos = m_scratch->get_column_pos(_name.c_str()); //done once , for the first time
 
@@ -663,7 +650,7 @@ class addsub_operation : public base_statement  {
         }
 };
 
-class base_function : public runtime_allocator
+class base_function 
 {
 
 protected:
@@ -676,10 +663,6 @@ public:
     bool is_aggregate() { return aggregate == true; }
     virtual void get_aggregate_result(variable *) {}
 
-    virtual void traverse_and_release()
-    {
-        release();
-    }
 };
 
 typedef enum {ADD,SUM,MIN,MAX,COUNT,TO_INT,TO_FLOAT,SUBSTR} s3select_func_En_t;
@@ -827,6 +810,11 @@ struct _fn_to_float : public base_function{
 
 struct _fn_substr : public base_function{
 
+    char buff[4096];// this buffer is persist for the query life time, it use for the results per row(only for the specific function call)
+    //it prevent from intensive use of malloc/free (fragmentation).
+    //should validate result length.
+    //TODO may replace by std::string (dynamic) , or to replace with global allocator , in query scope.
+
     bool operator()(list<base_statement*> * args,variable * result)
     {
         list<base_statement*>::iterator iter = args->begin();
@@ -842,7 +830,7 @@ struct _fn_substr : public base_function{
         base_statement* to;
 
         if (args_size == 3)
-        {
+                {
             iter++;
             to = *iter;
         }
@@ -861,7 +849,6 @@ struct _fn_substr : public base_function{
         value v_to;
         int64_t f;
         int64_t t;
-        char * s;
 
         if (args_size==3){
             v_to = to->eval();
@@ -877,9 +864,12 @@ struct _fn_substr : public base_function{
         if (f>str_length)
             throw base_s3select_exception("substr start position is too far");//can skip row
 
+        if (str_length>sizeof(buff))
+            throw base_s3select_exception("string too long for internal buffer");//can skip row
+
         if (args_size == 3)
         {
-            if (v_from.type == value::value_En_t::FLOAT) //TODO bundries checks
+            if (v_from.type == value::value_En_t::FLOAT)
                 t = v_to.__val.dbl;
             else
                 t = v_to.__val.num;
@@ -887,12 +877,12 @@ struct _fn_substr : public base_function{
             if( (str_length-(f-1)-t) <0)
                 throw base_s3select_exception("substr length parameter beyond bounderies");//can skip row
 
-            s=strndup(v_str.__val.str+f-1 , t );
+            strncpy(buff,v_str.__val.str+f-1,t);
         }
         else 
-            s=strdup(v_str.__val.str+f-1);
+            strcpy(buff,v_str.__val.str+f-1);
         
-        result->_set( value(s) );
+        result->_set( value(buff) );
 
         return true;
     }
@@ -1007,18 +997,6 @@ public:
         for (base_statement *ba : arguments)
         {
             ba->traverse_and_apply(sa);
-        }
-    }
-
-    virtual void traverse_and_release()
-    {
-        if (m_func_impl)
-            m_func_impl->traverse_and_release();//TODO no beed to traverse 
-
-        for (base_statement *ba : arguments)
-        {
-            ba->release();
-            ba->traverse_and_release();
         }
     }
 

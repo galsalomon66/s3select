@@ -95,12 +95,24 @@ struct push_float_number : public base_action //TODO use define for defintion of
     void operator()(const char *a, const char *b) const
     {
         string token(a, b);
-        char *perr;
-        double d = strtod(token.c_str(),&perr);
-        variable *v = new variable(d);
 
-        //TODO parse again check if decimal number
-        m_action->exprQ.push_back(v);
+        //the parser for float(real_p) is accepting also integers, thus "blocking" integer acceptence and all are float.
+        parse_info<> info = parse(token.c_str(), int_p, space_p);
+
+        if (!info.full)
+        {
+            char *perr;
+            double d = strtod(token.c_str(), &perr);
+            variable *v = new variable(d);
+
+            m_action->exprQ.push_back(v);
+        }
+        else
+        {
+            variable *v = new variable(atoi(token.c_str())); //TODO strtoll
+
+            m_action->exprQ.push_back(v);
+        }
     }
 
 } g_push_float_number;
@@ -336,10 +348,14 @@ struct push_logical_predicate : public base_action
 struct push_column_pos : public base_action
 {
     void operator()(const char *a,const char *b) const
-    {
+    { 
         string token(a, b);
+        variable *v;
 
-        variable *v = new variable(token.c_str() , variable::var_t::POS );
+        if (token.compare("*") == 0)
+            v = new variable(token.c_str(), variable::var_t::STAR_OPERATION);
+         else 
+            v = new variable(token.c_str(), variable::var_t::POS);
 
         m_action->exprQ.push_back(v);
     }

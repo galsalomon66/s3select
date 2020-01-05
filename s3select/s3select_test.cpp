@@ -122,8 +122,6 @@ public:
         {
             do
             {
-		if (m_where_clause)
-                	m_where_clause->traverse_and_release();
 
                 number_of_tokens = getNextRow(row_tokens);
                 if (number_of_tokens < 0) //end of stream
@@ -149,8 +147,6 @@ public:
 
             do
             {
-		if(m_where_clause)
-                	m_where_clause->traverse_and_release();
 
                 number_of_tokens = getNextRow(row_tokens);
                 if (number_of_tokens < 0)
@@ -162,7 +158,6 @@ public:
             for (auto i : m_projections)
             {
                 result.push_back(i->eval().to_string() );
-                i->traverse_and_release();
             }
         }
 
@@ -290,9 +285,13 @@ int main(int argc,char **argv)
             std::list<string> result;
             int num = my_input.getMatchRow(result);
 
-            for( auto s : result)
-                std::cout << s << "," ;
-            std::cout << std::endl;
+            for(std::list<string>::iterator it=result.begin();it != result.end(); it++)
+            {
+                if (std::next(it) != result.end()) 
+                    std::cout << *it << "," ;
+                else 
+                    std::cout << *it << std::endl;
+            }
 
             if (num<0)
                 break;
