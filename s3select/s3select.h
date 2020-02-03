@@ -22,10 +22,8 @@ class s3select_projections {
         bool is_aggregate()
         {
             //TODO iterate on projections , and search for aggregate
-            for(auto p : m_projections)
-                {
-                    
-                }
+            //for(auto p : m_projections){}
+
 	    return false;
         }
 
@@ -352,7 +350,7 @@ struct push_column_pos : public base_action
         string token(a, b);
         variable *v;
 
-        if (token.compare("*") == 0)
+        if (token.compare("*") == 0 || token.compare("* ")==0) //TODO space should skip in boost::spirit
             v = new variable(token.c_str(), variable::var_t::STAR_OPERATION);
          else 
             v = new variable(token.c_str(), variable::var_t::POS);
@@ -584,4 +582,6 @@ public:
     base_s3object(const char *obj_name, scratch_area *m) : m_sa(m), m_obj_name(obj_name) {}
 
     virtual int getNextRow(char **) = 0; //fetch next row
+
+    virtual ~base_s3object(){}
 };

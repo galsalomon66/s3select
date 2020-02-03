@@ -22,6 +22,8 @@ class base_s3select_exception {
         base_s3select_exception(std::string n, s3select_exp_en_t severity):m_severity(severity){ _msg = strdup(n.c_str());}//TODO allocator(?)
 
         virtual const char* what(){return _msg; }
+
+    virtual ~base_s3select_exception(){}
 };
 
 class scratch_area
@@ -42,7 +44,7 @@ public:
 
     void update(const char **tokens, int num_of_tokens)
     {
-        if (num_of_tokens > (sizeof(m_columns)/sizeof(char*))) 
+        if (num_of_tokens > (int)(sizeof(m_columns)/sizeof(char*))) 
                 throw base_s3select_exception("too_many_tokens");
 
         m_upper_bound = num_of_tokens;
@@ -311,7 +313,7 @@ class base_statement  {
         }
 
         //relase the AST , will be replace with dedicated allocator
-        virtual void dfs_del(){if (left()) left()->dfs_del();if (right()) right()->dfs_del();if (left()) delete left();if (right()) delete right();}
+        virtual void dfs_del(){return;if (left()) left()->dfs_del();if (right()) right()->dfs_del();if (left()) delete left();if (right()) delete right();}
 
         virtual bool is_aggregate(){return false;}
         virtual bool is_column(){return false;}
@@ -329,29 +331,35 @@ class base_statement  {
             if(right()) right()->set_last_call();
         }
 
+        virtual ~base_statement(){}
+
 };
 
 class variable : public base_statement
 {
 
-private:
-    
-    std::string _name;
-    int column_pos;
-    value var_value;
-
-    std::string m_star_op_result;
 public:
 
     typedef enum
     {
+        NA,
         VAR,//schema column (i.e. age , price , ...)
         COL_VALUE, //concrete value
         POS, // CSV column number  (i.e. _1 , _2 ... )
         STAR_OPERATION, //'*'
     } var_t; 
     var_t m_var_type;
+
+private:
     
+    std::string _name;
+    int column_pos;
+    value var_value;
+    std::string m_star_op_result;
+
+public:
+    
+    //variable():m_var_type(NA),_name("#"){}
 
     variable(int64_t i) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
 
@@ -359,9 +367,9 @@ public:
 
     variable(int i) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
 
-    variable(const char *n) : _name(n), m_var_type(VAR), column_pos(-1){}
+    variable(const char *n) : m_var_type(VAR), _name(n), column_pos(-1){}
 
-    variable(const char *n ,  var_t tp)
+    variable(const char *n ,  var_t tp) : m_var_type(NA)
     {
         if(tp == variable::var_t::POS)
         {
@@ -663,6 +671,7 @@ public:
     bool is_aggregate() { return aggregate == true; }
     virtual void get_aggregate_result(variable *) {}
 
+    virtual ~base_function(){}
 };
 
 typedef enum {ADD,SUM,MIN,MAX,COUNT,TO_INT,TO_FLOAT,SUBSTR} s3select_func_En_t;
@@ -864,7 +873,7 @@ struct _fn_substr : public base_function{
         if (f>str_length)
             throw base_s3select_exception("substr start position is too far");//can skip row
 
-        if (str_length>sizeof(buff))
+        if (str_length>(int)sizeof(buff))
             throw base_s3select_exception("string too long for internal buffer");//can skip row
 
         if (args_size == 3)
@@ -1026,6 +1035,7 @@ public:
 
     virtual void dfs_del()
     {
+        return; //TODO fix it
         for (auto ba : arguments)
         {
             ba->dfs_del();
@@ -1046,7 +1056,7 @@ public:
         return arguments;
     }
 
-    ~__function() { dfs_del(); }
+    virtual ~__function() { dfs_del(); }
 };
 
 bool base_statement::is_function()
