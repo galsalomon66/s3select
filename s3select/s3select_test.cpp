@@ -2,7 +2,7 @@
 #include <fstream>
 
 
-class csv_object : public base_s3object
+class csv_stream_object : public base_s3object
 {
 
     private:
@@ -59,7 +59,7 @@ class csv_object : public base_s3object
     }
     
 public:
-    csv_object(s3select *s3_query) : base_s3object(s3_query->get_from_clause().c_str(), s3_query->get_scratch_area())
+    csv_stream_object(s3select *s3_query) : base_s3object(s3_query->get_from_clause().c_str(), s3_query->get_scratch_area())
     {
         is_object_open = false;
         m_fp = 0;
@@ -278,7 +278,7 @@ int main(int argc,char **argv)
 
     try
     {
-        csv_object my_input(&s3select_syntax);
+        csv_stream_object my_input(&s3select_syntax);
 
         do
         {
