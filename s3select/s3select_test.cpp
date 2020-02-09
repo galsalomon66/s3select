@@ -241,69 +241,66 @@ int test_value(int argc,char **argv)
 }
 #endif
 
-int main(int argc,char **argv)
+int main(int argc, char **argv)
 {
-//purpose: demostrate the s3select functionalities 
+    //purpose: demostrate the s3select functionalities
     s3select s3select_syntax;
 
-    char *input_schema =0, *input_query =0;
+    char *input_schema = 0, *input_query = 0;
 
-    for(int i=0;i<argc;i++)
+    for (int i = 0; i < argc; i++)
     {
-        if (!strcmp(argv[i] ,"-s")) input_schema = argv[i+1];
-        if (!strcmp(argv[i] ,"-q")) input_query = argv[i+1];
+        if (!strcmp(argv[i], "-s"))
+            input_schema = argv[i + 1];
+        if (!strcmp(argv[i], "-q"))
+            input_query = argv[i + 1];
     }
 
     actionQ scm;
-    if (input_schema && cli_get_schema(input_schema, scm) < 0) {
+    if (input_schema && cli_get_schema(input_schema, scm) < 0)
+    {
         std::cout << "input schema is wrong" << std::endl;
         return -1;
     }
 
-    if(!input_query){
+    if (!input_query)
+    {
         std::cout << "type -q 'select ... from ...  '" << std::endl;
         return -1;
     }
 
     s3select_syntax.load_schema(scm.schema_columns);
 
-	parse_info<> info = parse( input_query , s3select_syntax, space_p);//TODO object
-    auto x = info.stop;
+    if (s3select_syntax.parse_query(input_query)<0) {std::cout << s3select_syntax.get_error_description();return -1;}
 
-    if(!info.full){std::cout << "failure -->" << x << "<---" << std::endl;return -1;}
-    
-    //std::cout << s3select_syntax.get_filter()->print(40) << std::endl;
-
-    //return -1;
-
-    try
     {
         csv_stream_object my_input(&s3select_syntax);
 
         do
         {
             std::list<string> result;
-            int num = my_input.getMatchRow(result);
-
-            for(std::list<string>::iterator it=result.begin();it != result.end(); it++)
+            int num = 0;
+            try
             {
-                if (std::next(it) != result.end()) 
-                    std::cout << *it << "," ;
-                else 
+                num = my_input.getMatchRow(result);
+            }
+            catch (base_s3select_exception e)
+            {
+                std::cout << e.what() << std::endl;
+                if (e.severity() == base_s3select_exception::s3select_exp_en_t::NONE)
+                    return -1;
+            }
+            for (std::list<string>::iterator it = result.begin(); it != result.end(); it++)
+            {
+                if (std::next(it) != result.end())
+                    std::cout << *it << ",";
+                else
                     std::cout << *it << std::endl;
             }
 
-            if (num<0)
+            if (num < 0)
                 break;
-
 
         } while (1);
     }
-    catch (base_s3select_exception e)
-    {   
-        std::cout << e.what() << std::endl;
-        return -1;
-    }
-
-    
 }
