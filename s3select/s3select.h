@@ -45,6 +45,9 @@ class s3select_projections {
 
 struct actionQ
 {
+// upon parser is accepting a token (lets say some number), 
+// it push it into dedicated queue, later those tokens are poped out to build some "higher" contruct (lets say 1 + 2)
+// those containers are used only for parsing phase and not for runtime.
 
     list<mulldiv_operation::muldiv_t> muldivQ;
     list<addsub_operation::addsub_op_t> addsubQ;
@@ -129,8 +132,7 @@ struct push_string : public base_action //TODO use define for defintion of actio
         a++;b--;// remove double quotes
         string token(a, b);
         
-        //strdup allocation should release only at the end of query-execution (class{runtime_allocator} not accessing those allocationr) 
-        variable *v = new variable(strdup( token.c_str() ),variable::var_t::COL_VALUE);
+        variable *v = new variable(token,variable::var_t::COL_VALUE);
 
         m_action->exprQ.push_back(v);
     }
@@ -144,7 +146,7 @@ struct push_variable : public base_action
     {
         string token(a, b);
 
-        variable *v = new variable(token.c_str());
+        variable *v = new variable(token);
 
         m_action->exprQ.push_back(v);
     }
@@ -370,9 +372,9 @@ struct push_column_pos : public base_action
         variable *v;
 
         if (token.compare("*") == 0 || token.compare("* ")==0) //TODO space should skip in boost::spirit
-            v = new variable(token.c_str(), variable::var_t::STAR_OPERATION);
+            v = new variable(token, variable::var_t::STAR_OPERATION);
          else 
-            v = new variable(token.c_str(), variable::var_t::POS);
+            v = new variable(token, variable::var_t::POS);
 
         m_action->exprQ.push_back(v);
     }
@@ -645,15 +647,24 @@ private:
   base_statement *m_where_clause;
   list<base_statement *> m_projections;
   bool m_aggr_flow = false; //TODO once per query
-  int line_index;
+  size_t line_index;
   bool m_is_to_aggregate;
+  bool m_skip_last_line;
+  size_t m_total_processed_bytes;
+  size_t m_stream_length;
+  std::string m_error_description;
 
   int getNextRow(char **tokens) //TODO add delimiter
   {                             //purpose: simple csv parser, not handling escape rules
 
-    if (line_index >= (int)m_csv_lines.size()) return -1;
+    if(m_skip_last_line && line_index >= (m_csv_lines.size()-1)) return -1;
+
+    if(line_index >= m_csv_lines.size()) return -1;
     if(m_csv_lines[line_index].empty()) return -1;
     
+    m_total_processed_bytes += m_csv_lines[line_index].size()+1;
+    if(m_total_processed_bytes > m_stream_length) return -1;
+
     char *p = (char *)m_csv_lines[line_index].c_str(); //TODO another boost splitter
     int i = 0;
     while (*p)
@@ -673,17 +684,21 @@ private:
   }
 
 public:
-  csv_object(s3select *s3_query,std::string query,char *csv_stream,bool do_aggregate = false) : base_s3object(s3_query->get_scratch_area())
-  {
+  csv_object(s3select *s3_query,std::string query,const char *csv_stream,size_t stream_length,bool skip_first_line,bool skip_last_line,bool do_aggregate) : base_s3object(s3_query->get_scratch_area())
+  { 
 
     if (s3_query->parse_query(query.c_str()) <0) return;//TODO set error state/description 
 
     std::string __stream(csv_stream);
     boost::split(m_csv_lines, __stream, [](char c) { return c == '\n'; }); //splitting the stream (should be 4->128 mb)
-    line_index = 0;
+    line_index = (skip_first_line == true ? 1 : 0);
     m_projections = s3_query->get_projections_list();
     m_where_clause = s3_query->get_filter();
     m_is_to_aggregate = do_aggregate;
+    m_skip_last_line = skip_last_line;
+
+    m_total_processed_bytes = (skip_first_line == true ? m_csv_lines[0].size() : 0);
+    m_stream_length = stream_length;
 
     if (m_where_clause)
       m_where_clause->traverse_and_apply(m_sa);
@@ -717,6 +732,8 @@ public:
       }
   }
 
+std::string get_error_description(){return m_error_description;}
+
 virtual ~csv_object(){}
 
 public:
@@ -741,6 +758,12 @@ public:
                 }
 
           return number_of_tokens;
+        }
+
+        if ((*m_projections.begin())->is_set_last_call())
+        {
+            //should validate while query execution , no update upon nodes are marked with set_last_call
+            throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::FATAL);
         }
 
         m_sa->update((const char **)row_tokens, number_of_tokens);
@@ -773,7 +796,7 @@ public:
     return number_of_tokens; //TODO wrong
   }
 
-  int run_s3select_on_object(std::string &o_result) //,s3select &s3select_syntax)
+  int run_s3select_on_object(std::string &o_result)
   {
 
       do
@@ -787,7 +810,8 @@ public:
           catch (base_s3select_exception &e)
           {
               std::cout << e.what() << std::endl;
-              if (e.severity() == base_s3select_exception::s3select_exp_en_t::NONE)
+              m_error_description = e.what();
+              if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL)//abort query execution
                   return -1;
           }
 

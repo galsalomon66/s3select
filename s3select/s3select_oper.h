@@ -341,6 +341,8 @@ class base_statement  {
             if(right()) right()->set_last_call();
         }
 
+        bool is_set_last_call(){return is_last_call;}
+
         virtual ~base_statement(){}
 
 };
@@ -377,15 +379,15 @@ public:
 
     variable(int i) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
 
-    variable(const char *n) : m_var_type(VAR), _name(n), column_pos(-1){}
+    variable(std::string & n) : m_var_type(VAR), _name(n), column_pos(-1){}
 
-    variable(const char *n ,  var_t tp) : m_var_type(NA)
+    variable(std::string & n ,  var_t tp) : m_var_type(NA)
     {
         if(tp == variable::var_t::POS)
         {
             _name = n;
             m_var_type = tp;
-            int pos = atoi( n+1 ); //TODO >0 < (schema definition , semantic analysis)
+            int pos = atoi( n.c_str() + 1 ); //TODO >0 < (schema definition , semantic analysis)
             column_pos = pos -1;// _1 is the first column ( zero position )
         }
         else if (tp == variable::var_t::COL_VALUE)
@@ -393,7 +395,7 @@ public:
             _name = "#";
             m_var_type = tp;
             column_pos = -1;
-            var_value.__val.str = n;
+            var_value.__val.str = n.c_str();
             var_value.type = value::value_En_t::STRING;
 
         }else if (tp ==variable::var_t::STAR_OPERATION)
