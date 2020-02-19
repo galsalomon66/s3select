@@ -9,6 +9,58 @@
 #include <math.h>
 
 using namespace std;
+
+// pointer to dynamic allocated buffer , which used for placement new.
+static __thread char* _s3select_buff_ptr =0;
+
+class s3select_allocator //s3select is the "owner"
+{
+    private:
+    char * m_alloc; //TODO list of buffer 
+    u_int32_t m_idx;
+
+    public:
+        #define __SIZE__ (1024*1024*4) //TODO temporary
+        s3select_allocator():m_alloc((char*)malloc(__SIZE__)),m_idx(0){}
+
+        void set_global_buff()
+        {
+            _s3select_buff_ptr = &m_alloc[ m_idx ];
+        }
+
+        void inc(size_t sz)
+        {
+                m_idx += sz;
+                m_idx += 8 - (m_idx%8);//alignment
+                if (m_idx>__SIZE__) abort();//TODO temporary 
+        }
+
+        void zero(){_s3select_buff_ptr=0;}//not necessary, for safty.
+        
+        virtual ~s3select_allocator(){if(m_alloc) free(m_alloc);m_alloc=0;}
+};
+
+class __clt_allocator
+{
+    public:
+        s3select_allocator * m_s3select_allocator;
+
+    public:
+        
+        __clt_allocator():m_s3select_allocator(0){}
+
+        void set(s3select_allocator * a)
+        {
+            m_s3select_allocator = a;
+        }
+};
+
+// placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
+#define S3SELECT_NEW( type , ... ) [=]() \
+        {   \
+            m_s3select_allocator->set_global_buff();auto res=new (_s3select_buff_ptr) type(__VA_ARGS__);m_s3select_allocator->zero();m_s3select_allocator->inc(sizeof(type));return res; \
+        }();
+
 class base_s3select_exception
 {
 
@@ -27,7 +79,7 @@ public:
     const char *_msg;
     base_s3select_exception(const char *n) : m_severity(NONE) { _msg = n; }
     base_s3select_exception(const char *n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n; }
-    base_s3select_exception(std::string n, s3select_exp_en_t severity) : m_severity(severity) { _msg = strdup(n.c_str()); } //TODO allocator(?)
+    base_s3select_exception(std::string n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n.c_str(); } 
 
     virtual const char *what() { return _msg; }
 
@@ -379,9 +431,9 @@ public:
 
     variable(int i) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
 
-    variable(std::string & n) : m_var_type(VAR), _name(n), column_pos(-1){}
+    variable(const std::string & n) : m_var_type(VAR), _name(n), column_pos(-1){}
 
-    variable(std::string & n ,  var_t tp) : m_var_type(NA)
+    variable(const std::string & n ,  var_t tp) : m_var_type(NA)
     {
         if(tp == variable::var_t::POS)
         {
@@ -520,7 +572,7 @@ class arithmetic_operand : public base_statement {
 
 		arithmetic_operand(base_statement*_l , cmp_t c , base_statement* _r):l(_l),r(_r),_cmp(c){}
 
-        virtual ~arithmetic_operand(){if(l) {delete l;l=0;} if(r){delete r;r=0;}}
+        virtual ~arithmetic_operand(){}
 };
 
 class logical_operand : public base_statement  {
@@ -544,7 +596,7 @@ class logical_operand : public base_statement  {
 
 		logical_operand(base_statement *_l , oplog_t _o ,base_statement* _r):l(_l),r(_r),_oplog(_o){}
 
-        virtual ~logical_operand(){if(l) {delete l;l=0;} if(r){delete r;r=0;}}
+        virtual ~logical_operand(){}
 
         virtual std::string print(int ident)
         {
@@ -616,7 +668,7 @@ class mulldiv_operation : public base_statement {
 
 		mulldiv_operation(base_statement*_l , muldiv_t c , base_statement* _r):l(_l),r(_r),_mulldiv(c){}
 
-        virtual ~mulldiv_operation(){if(l) {delete l;l=0;} if(r){delete r;r=0;}}
+        virtual ~mulldiv_operation(){}
 };
 
 class addsub_operation : public base_statement  {
@@ -640,7 +692,7 @@ class addsub_operation : public base_statement  {
 
 		addsub_operation(base_statement *_l , addsub_op_t _o ,base_statement* _r):l(_l),r(_r),_op(_o){}
 
-        virtual ~addsub_operation(){if(l) {delete l;l=0;} if(r){delete r;r=0;}}
+        virtual ~addsub_operation(){}
 
         virtual std::string print(int ident)
         {
@@ -920,15 +972,11 @@ struct _fn_substr : public base_function{
     
 };
 
-class s3select_functions {
+class s3select_functions : public __clt_allocator {
 
     private:
         
-        static s3select_functions* m_fp;
-
         std::map<std::string,s3select_func_En_t> m_functions_library;
-
-        s3select_functions(){}
 
         void build_library()
         {
@@ -945,14 +993,16 @@ class s3select_functions {
 
     public:
 
-    static base_function * create(std::string fn_name)
-    {//create functor per each function-call in AST, done once (per node) on runtime
-        if(m_fp == 0)
-            {m_fp = new s3select_functions();m_fp->build_library();}
+        s3select_functions()
+        {
+            build_library();
+        }
 
-        std::map<std::string,s3select_func_En_t>::iterator iter = m_fp->m_functions_library.find(fn_name);
+    base_function * create(std::string fn_name)
+    {
+        std::map<std::string,s3select_func_En_t>::iterator iter = m_functions_library.find(fn_name);
 
-        if (iter == m_fp->m_functions_library.end())
+        if (iter == m_functions_library.end())
         {
             std::string msg;
             msg = fn_name + " " + " function not found";
@@ -962,35 +1012,35 @@ class s3select_functions {
         switch( iter->second )
         {
             case s3select_func_En_t::ADD:
-                return new _fn_add(); 
+                return S3SELECT_NEW (_fn_add);
             break;
 
             case s3select_func_En_t::SUM:
-                return new _fn_sum(); 
+                return S3SELECT_NEW(_fn_sum);
             break;
 
             case s3select_func_En_t::COUNT:
-                return new _fn_count(); 
+                return S3SELECT_NEW(_fn_count);
             break;
 
             case s3select_func_En_t::MIN:
-                return new _fn_min(); 
+                return S3SELECT_NEW(_fn_min);
             break;
 
             case s3select_func_En_t::MAX:
-                return new _fn_max(); 
+                return S3SELECT_NEW(_fn_max);
             break;
 
             case s3select_func_En_t::TO_INT:
-                return new _fn_to_int(); 
+                return S3SELECT_NEW(_fn_to_int);
             break;
 
             case s3select_func_En_t::TO_FLOAT:
-                return new _fn_to_float(); 
+                return S3SELECT_NEW(_fn_to_float);
             break;
 
             case s3select_func_En_t::SUBSTR:
-                return new _fn_substr(); 
+                return S3SELECT_NEW(_fn_substr);
             break;
 
             default:
@@ -1000,7 +1050,6 @@ class s3select_functions {
     }
 };
 
-s3select_functions* s3select_functions::m_fp = 0;
 
 class __function : public base_statement
 {
@@ -1009,13 +1058,14 @@ private:
     list<base_statement *> arguments;
     std::string name;
     base_function *m_func_impl;
+    s3select_functions *m_s3select_functions;
 
     void _resolve_name()
     {
         if (m_func_impl)
             return;
 
-        base_function *f = s3select_functions::create(name); //TODO handle exception
+        base_function *f = m_s3select_functions->create(name);
         if (!f)
             throw base_s3select_exception("function not found", base_s3select_exception::s3select_exp_en_t::FATAL); //should abort query
         m_func_impl = f;
@@ -1040,7 +1090,7 @@ public:
 
     virtual bool semantic() { return true; }
 
-    __function(const char *fname) : name(fname), m_func_impl(0) {}
+    __function(const char *fname, s3select_functions* s3f) : name(fname), m_func_impl(0),m_s3select_functions(s3f) {}
 
     virtual value eval(){
 
@@ -1055,15 +1105,7 @@ public:
         return result.get_value();
     }
 
-    virtual void dfs_del()
-    {
-        return; //TODO fix it
-        for (auto ba : arguments)
-        {
-            ba->dfs_del();
-            delete ba;
-        }
-    }
+
 
     virtual std::string  print(int ident) {return std::string(0);}
 
@@ -1078,7 +1120,7 @@ public:
         return arguments;
     }
 
-    virtual ~__function() { dfs_del(); }
+    virtual ~__function() {arguments.clear();}
 };
 
 bool base_statement::is_function()

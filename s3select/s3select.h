@@ -62,13 +62,15 @@ struct actionQ
 
 };
 
-class base_action
+class base_action : public __clt_allocator
 {
 
 public:
-    base_action() : m_action(0) {}
+    base_action() : m_action(0), m_s3select_functions(0){}
     actionQ *m_action;
     void set_action_q(actionQ *a) { m_action = a; }
+    void set_s3select_functions(s3select_functions * s3f){m_s3select_functions = s3f;}
+    s3select_functions * m_s3select_functions;
 };
 
 struct push_from_clause : public base_action
@@ -87,7 +89,8 @@ struct push_number : public base_action //TODO use define for defintion of actio
     void operator()(const char *a, const char *b) const
     {
         string token(a, b);
-        variable *v = new variable(atoi(token.c_str())); //TODO strtoll
+        variable *v = S3SELECT_NEW( variable , atoi(token.c_str())); 
+
 
         m_action->exprQ.push_back(v);
     }
@@ -109,13 +112,13 @@ struct push_float_number : public base_action //TODO use define for defintion of
         {
             char *perr;
             double d = strtod(token.c_str(), &perr);
-            variable *v = new variable(d);
+            variable *v = S3SELECT_NEW( variable , d);
 
             m_action->exprQ.push_back(v);
         }
         else
         {
-            variable *v = new variable(atoi(token.c_str())); //TODO strtoll
+            variable * v = S3SELECT_NEW(variable,atoi(token.c_str()));
 
             m_action->exprQ.push_back(v);
         }
@@ -132,7 +135,7 @@ struct push_string : public base_action //TODO use define for defintion of actio
         a++;b--;// remove double quotes
         string token(a, b);
         
-        variable *v = new variable(token,variable::var_t::COL_VALUE);
+        variable *v = S3SELECT_NEW(variable,variable::var_t::COL_VALUE );
 
         m_action->exprQ.push_back(v);
     }
@@ -146,7 +149,7 @@ struct push_variable : public base_action
     {
         string token(a, b);
 
-        variable *v = new variable(token);
+        variable *v = S3SELECT_NEW(variable, token);
 
         m_action->exprQ.push_back(v);
     }
@@ -196,7 +199,7 @@ struct push_addsub_binop : public base_action
         m_action->exprQ.pop_back();
         addsub_operation::addsub_op_t o = m_action->addsubQ.back();
         m_action->addsubQ.pop_back();
-        addsub_operation *as = new addsub_operation(l, o, r);
+        addsub_operation *as = S3SELECT_NEW(addsub_operation, l, o, r);
         m_action->exprQ.push_back(as);
     }
 };
@@ -214,7 +217,7 @@ struct push_mulldiv_binop : public base_action
         m_action->exprQ.pop_back();
         mulldiv_operation::muldiv_t o = m_action->muldivQ.back();
         m_action->muldivQ.pop_back();
-        mulldiv_operation *f = new mulldiv_operation(vl, o, vr);
+        mulldiv_operation *f = S3SELECT_NEW(mulldiv_operation,vl,o,vr);
         m_action->exprQ.push_back(f);
     }
 };
@@ -244,8 +247,7 @@ struct push_function_name : public base_action
 
         std::string fn;fn.assign(a,b-a+1);
 
-        __function *func = new __function(fn.c_str());
-
+        __function *func = S3SELECT_NEW(__function, fn.c_str(), m_s3select_functions);
         m_action->funcQ.push_back(func);
     }
 };
@@ -328,7 +330,7 @@ struct push_arithmetic_predicate : public base_action
         vl = m_action->exprQ.back();
         m_action->exprQ.pop_back();
 
-        arithmetic_operand *t = new arithmetic_operand(vl, c, vr);
+        arithmetic_operand *t = S3SELECT_NEW(arithmetic_operand ,vl ,c ,vr);
 
         m_action->condQ.push_back(t);
     }
@@ -357,7 +359,7 @@ struct push_logical_predicate : public base_action
             m_action->condQ.pop_back();
         }
 
-        logical_operand *f = new logical_operand(tl, oplog, tr);
+        logical_operand *f = S3SELECT_NEW(logical_operand, tl, oplog, tr);
 
         m_action->condQ.push_back(f);
     }
@@ -372,9 +374,9 @@ struct push_column_pos : public base_action
         variable *v;
 
         if (token.compare("*") == 0 || token.compare("* ")==0) //TODO space should skip in boost::spirit
-            v = new variable(token, variable::var_t::STAR_OPERATION);
+            {v = S3SELECT_NEW(variable, token, variable::var_t::STAR_OPERATION);}
          else 
-            v = new variable(token, variable::var_t::POS);
+            {v = S3SELECT_NEW(variable, token, variable::var_t::POS);}
 
         m_action->exprQ.push_back(v);
     }
@@ -429,11 +431,15 @@ struct s3select : public grammar<s3select>
 
     scratch_area m_sca;//TODO on heap
 
+    s3select_functions m_s3select_functions;
+
     std::string error_description;
+
+    s3select_allocator m_s3select_allocator;
 
 
     #define BOOST_BIND_ACTION( push_name ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2)
-    #define ATTACH_ACTION_Q( push_name ) {(g_ ## push_name).set_action_q(&m_actionQ);}
+    #define ATTACH_ACTION_Q( push_name ) {(g_ ## push_name).set_action_q(&m_actionQ); (g_ ## push_name).set_s3select_functions(&m_s3select_functions); (g_ ## push_name).set(&m_s3select_allocator);}
 
     public:
 
@@ -481,6 +487,7 @@ struct s3select : public grammar<s3select>
 
         error_description.clear();
 
+        m_s3select_functions.set(&m_s3select_allocator);
     }
 
     bool is_semantic()//TBD traverse and validate semantics per all nodes
@@ -517,35 +524,8 @@ struct s3select : public grammar<s3select>
         return &m_sca;
     }
 
-    ~s3select()
-    {
-        if (m_actionQ.exprQ.empty() == false)
-        {
-            for (auto e : m_actionQ.exprQ)
-                if (e)
-                {
-                    e->dfs_del();
-                    delete e;
-                }
-        }
+    ~s3select(){}
 
-        if (m_actionQ.condQ.empty() == false)
-        {
-            for (auto c : m_actionQ.condQ)
-                if (c)
-                {
-                    c->dfs_del();
-                    delete c;
-                }
-        }
-
-        for (auto p : get_projections_list())
-            if (p)
-            {
-                p->dfs_del();
-                delete p;
-            }
-    }
 
     template <typename ScannerT>
     struct definition
