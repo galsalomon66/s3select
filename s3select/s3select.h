@@ -135,7 +135,7 @@ struct push_string : public base_action //TODO use define for defintion of actio
         a++;b--;// remove double quotes
         string token(a, b);
         
-        variable *v = S3SELECT_NEW(variable,variable::var_t::COL_VALUE );
+        variable *v = S3SELECT_NEW(variable,token,variable::var_t::COL_VALUE );
 
         m_action->exprQ.push_back(v);
     }
@@ -743,7 +743,7 @@ public:
         if ((*m_projections.begin())->is_set_last_call())
         {
             //should validate while query execution , no update upon nodes are marked with set_last_call
-            throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::FATAL);
+            throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::s3select_exp_en_t::FATAL);
         }
 
         m_sa->update((const char **)row_tokens, number_of_tokens);

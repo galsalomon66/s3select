@@ -10,34 +10,85 @@
 
 using namespace std;
 
+class base_s3select_exception
+{
+
+public:
+    enum class s3select_exp_en_t
+    {
+        NONE,
+        ERROR,
+        FATAL
+    } ;
+
+private:
+    s3select_exp_en_t m_severity;
+
+public:
+    const char *_msg;
+    base_s3select_exception(const char *n) : m_severity(s3select_exp_en_t::NONE) { _msg = n; }
+    base_s3select_exception(const char *n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n; }
+    base_s3select_exception(std::string n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n.c_str(); } 
+
+    virtual const char *what() { return _msg; }
+
+    s3select_exp_en_t severity() { return m_severity; }
+
+    virtual ~base_s3select_exception() {}
+};
+
+
 // pointer to dynamic allocated buffer , which used for placement new.
 static __thread char* _s3select_buff_ptr =0;
 
 class s3select_allocator //s3select is the "owner"
 {
     private:
-    char * m_alloc; //TODO list of buffer 
+
+    list<char*> list_of_buff;
     u_int32_t m_idx;
 
     public:
-        #define __SIZE__ (1024*1024*4) //TODO temporary
-        s3select_allocator():m_alloc((char*)malloc(__SIZE__)),m_idx(0){}
+        #define __S3_ALLOCATION_BUFF__ (8*1024) 
+        s3select_allocator():m_idx(0)
+        {
+            list_of_buff.push_back((char*)malloc(__S3_ALLOCATION_BUFF__));
+        }
 
         void set_global_buff()
         {
-            _s3select_buff_ptr = &m_alloc[ m_idx ];
+            char * buff = list_of_buff.back();
+            _s3select_buff_ptr = &buff[ m_idx ];
+        }
+
+        void check_capacity(size_t sz)
+        {
+            if (sz>__S3_ALLOCATION_BUFF__)
+                throw base_s3select_exception("requested size too big",base_s3select_exception::s3select_exp_en_t::FATAL);
+
+            if ((m_idx + sz) >= __S3_ALLOCATION_BUFF__)
+            {
+                list_of_buff.push_back((char *)malloc(__S3_ALLOCATION_BUFF__));
+                m_idx = 0;
+            }
         }
 
         void inc(size_t sz)
         {
-                m_idx += sz;
-                m_idx += 8 - (m_idx%8);//alignment
-                if (m_idx>__SIZE__) abort();//TODO temporary 
+            m_idx += sz;
+            m_idx += sizeof(char*) - (m_idx % sizeof(char*)); //alignment
         }
 
-        void zero(){_s3select_buff_ptr=0;}//not necessary, for safty.
+        void zero()
+        {//not a must, its for safty.
+            _s3select_buff_ptr=0;
+        }
         
-        virtual ~s3select_allocator(){if(m_alloc) free(m_alloc);m_alloc=0;}
+        virtual ~s3select_allocator()
+        {
+            for(auto b : list_of_buff)
+                free(b);
+        }
 };
 
 class __clt_allocator
@@ -58,35 +109,13 @@ class __clt_allocator
 // placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
 #define S3SELECT_NEW( type , ... ) [=]() \
         {   \
-            m_s3select_allocator->set_global_buff();auto res=new (_s3select_buff_ptr) type(__VA_ARGS__);m_s3select_allocator->zero();m_s3select_allocator->inc(sizeof(type));return res; \
+            m_s3select_allocator->check_capacity(sizeof( type )); \
+            m_s3select_allocator->set_global_buff(); \
+            auto res=new (_s3select_buff_ptr) type(__VA_ARGS__); \
+            m_s3select_allocator->inc(sizeof( type )); \
+            m_s3select_allocator->zero(); \
+            return res; \
         }();
-
-class base_s3select_exception
-{
-
-public:
-    typedef enum
-    {
-        NONE,
-        ERROR,
-        FATAL
-    } s3select_exp_en_t;
-
-private:
-    s3select_exp_en_t m_severity;
-
-public:
-    const char *_msg;
-    base_s3select_exception(const char *n) : m_severity(NONE) { _msg = n; }
-    base_s3select_exception(const char *n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n; }
-    base_s3select_exception(std::string n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n.c_str(); } 
-
-    virtual const char *what() { return _msg; }
-
-    s3select_exp_en_t severity() { return m_severity; }
-
-    virtual ~base_s3select_exception() {}
-};
 
 class scratch_area
 {
@@ -135,7 +164,7 @@ public:
     {
     
         if ((column_pos >= m_upper_bound) || column_pos < 0) 
-            throw base_s3select_exception("column_position_is_wrong",base_s3select_exception::ERROR); 
+            throw base_s3select_exception("column_position_is_wrong",base_s3select_exception::s3select_exp_en_t::ERROR); 
 
         return m_columns[column_pos];
     }
@@ -190,17 +219,17 @@ public:
         double dbl;
     } value_t;
 
-//private://TODO must be private with getter's
+private:
     value_t __val;
 
 public:
-    typedef enum
+    enum class value_En_t
     {
         DECIMAL,
         FLOAT,
         STRING,
         NA
-    } value_En_t;
+    } ;
     value_En_t type; // TODO private
 
     value(int64_t n) : type(value_En_t::DECIMAL) { __val.num = n; }
@@ -208,11 +237,11 @@ public:
     value(bool b) : type(value_En_t::DECIMAL) { __val.num = (int64_t)b; }
     value(double d) : type(value_En_t::FLOAT) { __val.dbl = d; }
     value(const char *s) : type(value_En_t::STRING) { __val.str = s; } //must be allocated "all the way up the stack (AST)"
-    value():type(value_En_t::NA){__val.num=0;} //TODO check if possible to remove this contructor. need that for variable which is a column name 
+    value():type(value_En_t::NA){__val.num=0;}
 
     bool is_number() const
     {
-        if ((type != value_En_t::STRING)) //TODO NA 
+        if ((type != value_En_t::STRING))
             return true;
         else
             return false;
@@ -221,10 +250,10 @@ public:
 
     int64_t get_num(){return __val.num;}
 
-    std::string to_string(){
+    std::string to_string(){//TODO very intensive , must improve this
 
-        if (type != STRING){
-                if (type == DECIMAL){
+        if (type != value_En_t::STRING){
+                if (type == value_En_t::DECIMAL){
                         return std::to_string(__val.num);
                 }else {
                         return std::to_string(__val.dbl);
@@ -242,6 +271,21 @@ public:
 	return *this;
     }
 
+    int64_t i64()
+    {
+        return __val.num;
+    }
+
+    const char * str()
+    {
+        return __val.str;
+    }
+
+    double dbl()
+    {
+        return __val.dbl;
+    }
+
     bool operator<(const value &v)//basic compare operator , most itensive runtime operation 
     {
             //TODO NA possible?
@@ -251,7 +295,7 @@ public:
         if (is_number() && v.is_number()){
 
             if(type != v.type){ //conversion //TODO find better way
-                    if (type == DECIMAL){
+                    if (type == value_En_t::DECIMAL){
                             return (double)__val.num < v.__val.dbl;
                     }
                     else {
@@ -259,7 +303,7 @@ public:
                     }
             }
             else { //no conversion
-                if(type == DECIMAL){
+                if(type == value_En_t::DECIMAL){
                             return __val.num < v.__val.num;
                 }
                 else{
@@ -295,29 +339,29 @@ public:
         if (l.type != r.type)
         { //conversion
 
-            if (l.type == DECIMAL)
+            if (l.type == value_En_t::DECIMAL)
             {
                 l.__val.dbl = __op((double)l.__val.num , r.__val.dbl);
-                l.type = FLOAT;
+                l.type = value_En_t::FLOAT;
             }
             else
             {
                 l.__val.dbl = __op(l.__val.dbl , (double)r.__val.num);
-                l.type = FLOAT;
+                l.type = value_En_t::FLOAT;
             }
         }
         else
         { //no conversion
 
-            if (l.type == DECIMAL)
+            if (l.type == value_En_t::DECIMAL)
             {
                 l.__val.num = __op(l.__val.num , r.__val.num );
-                l.type = DECIMAL;
+                l.type = value_En_t::DECIMAL;
             }
             else
             {
                 l.__val.dbl = __op(l.__val.dbl , r.__val.dbl );
-                l.type = FLOAT;
+                l.type = value_En_t::FLOAT;
             }
         }
 
@@ -374,9 +418,6 @@ class base_statement  {
                 right()->traverse_and_apply(m_scratch);
         }
 
-        //relase the AST , will be replace with dedicated allocator
-        virtual void dfs_del(){return;if (left()) left()->dfs_del();if (right()) right()->dfs_del();if (left()) delete left();if (right()) delete right();}
-
         virtual bool is_aggregate(){return false;}
         virtual bool is_column(){return false;}
         
@@ -404,14 +445,14 @@ class variable : public base_statement
 
 public:
 
-    typedef enum
+    enum class var_t
     {
         NA,
         VAR,//schema column (i.e. age , price , ...)
         COL_VALUE, //concrete value
         POS, // CSV column number  (i.e. _1 , _2 ... )
         STAR_OPERATION, //'*'
-    } var_t; 
+    } ; 
     var_t m_var_type;
 
 private:
@@ -425,15 +466,15 @@ public:
     
     //variable():m_var_type(NA),_name("#"){}
 
-    variable(int64_t i) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
+    variable(int64_t i) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
 
-    variable(double d) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(d){}
+    variable(double d) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1),var_value(d){}
 
-    variable(int i) : m_var_type(COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
+    variable(int i) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
 
-    variable(const std::string & n) : m_var_type(VAR), _name(n), column_pos(-1){}
+    variable(const std::string & n) : m_var_type(var_t::VAR), _name(n), column_pos(-1){}
 
-    variable(const std::string & n ,  var_t tp) : m_var_type(NA)
+    variable(const std::string & n ,  var_t tp) : m_var_type(var_t::NA)
     {
         if(tp == variable::var_t::POS)
         {
@@ -447,31 +488,33 @@ public:
             _name = "#";
             m_var_type = tp;
             column_pos = -1;
-            var_value.__val.str = n.c_str();
-            var_value.type = value::value_En_t::STRING;
+            var_value = value(n.c_str());
 
         }else if (tp ==variable::var_t::STAR_OPERATION)
         {
             _name = "#";
             m_var_type = tp;
             column_pos = -1;
-            var_value.__val.str = 0;
-            var_value.type = value::value_En_t::STRING;//TODO NA??
+            var_value = value();
+
         }
+    }
+
+    void operator=(const value & v)
+    {
+        var_value = v;
     }
 
     virtual ~variable(){}
 
     virtual bool is_column() {//is reference to column.
-            if(m_var_type == VAR || m_var_type == POS) return true;
+            if(m_var_type == var_t::VAR || m_var_type == var_t::POS) return true;
             return false;
     }
 
     value & get_value() {return var_value;} //TODO is it correct
     virtual value::value_En_t get_value_type() {return var_value.type;}
 
-    void _set(int64_t i) {var_value.__val.num = i;}
-    void _set(value  i) {var_value = i;}
 
     const char * star_operation(){ //purpose return content of all columns in a input stream
 
@@ -490,9 +533,9 @@ public:
 
     virtual value eval()
     {
-        if (m_var_type == COL_VALUE) //return value
-            return var_value;           // could be deciml / float / string ; comes from stream
-        else if(m_var_type == STAR_OPERATION)
+        if (m_var_type == var_t::COL_VALUE) //return value
+            return var_value;           // could be deciml / float / string ; its input stream
+        else if(m_var_type == var_t::STAR_OPERATION)
             return star_operation();
         else if (column_pos == -1)
             column_pos = m_scratch->get_column_pos(_name.c_str()); //done once , for the first time
@@ -502,13 +545,12 @@ public:
 
     virtual std::string print(int ident)
     {
-        std::string out = std::string(ident,' ') + std::string("var:") + std::to_string(var_value.__val.num);
-        return out;
+        //std::string out = std::string(ident,' ') + std::string("var:") + std::to_string(var_value.__val.num);
+        //return out;
+        return std::string("#");//TBD
     }
 
     virtual bool semantic(){return false;}
-
-    virtual void dfs_del(){}
 
 };
 
@@ -516,7 +558,7 @@ class arithmetic_operand : public base_statement {
 
 	public:
 
-		typedef enum {NA,EQ,LE,LT,GT,GE,NE} cmp_t;
+		enum class cmp_t {NA,EQ,LE,LT,GT,GE,NE} ;
 
 	private:
 		base_statement* l;
@@ -531,36 +573,38 @@ class arithmetic_operand : public base_statement {
         virtual base_statement* left(){return l;}
         virtual base_statement* right(){return r;}
         
-	virtual std::string print(int ident){
-           std::string out = std::string(ident,' ') + "compare:" += std::to_string(_cmp) + "\n" + l->print(ident-5) +r->print(ident+5);
-            return out;
+	virtual std::string print(int ident)
+    {
+           //std::string out = std::string(ident,' ') + "compare:" += std::to_string(_cmp) + "\n" + l->print(ident-5) +r->print(ident+5);
+            //return out;
+            return std::string("#");//TBD
 	}
         
         virtual value eval(){
 
 			switch (_cmp)
 			{
-				case EQ:
+				case cmp_t::EQ:
 					return (l->eval() == r->eval());
 					break;
 
-				case LE:
+				case cmp_t::LE:
 					return (l->eval() <= r->eval());
 					break;
 
-				case GE:
+				case cmp_t::GE:
 					return (l->eval() >= r->eval());
 					break;
 
-				case NE:
+				case cmp_t::NE:
 					return (l->eval() != r->eval());
 					break;
 
-				case GT:
+				case cmp_t::GT:
 					return (l->eval() > r->eval());
 					break;
 
-				case LT:
+				case cmp_t::LT:
 					return (l->eval() < r->eval());
 					break;
 
@@ -579,7 +623,7 @@ class logical_operand : public base_statement  {
 
 	public:
 
-		typedef enum {AND,OR,NA} oplog_t;
+        enum class oplog_t {AND,OR,NA};
 
 	private:
 		base_statement* l;
@@ -600,19 +644,20 @@ class logical_operand : public base_statement  {
 
         virtual std::string print(int ident)
         {
-            std::string out = std::string(ident, ' ') + "logical_operand:" += std::to_string(_oplog) + "\n" + l->print(ident - 5) + r->print(ident + 5);
-            return out;
+            //std::string out = std::string(ident, ' ') + "logical_operand:" += std::to_string(_oplog) + "\n" + l->print(ident - 5) + r->print(ident + 5);
+            //return out;
+            return std::string("#");//TBD
         }
         virtual value eval()
         {
-            if (_oplog == AND)
+            if (_oplog == oplog_t::AND)
 			{
-                if (!l || !r) throw base_s3select_exception("missing operand for logical and",base_s3select_exception::FATAL);
+                if (!l || !r) throw base_s3select_exception("missing operand for logical and",base_s3select_exception::s3select_exp_en_t::FATAL);
 				return value( (l->eval().get_num() && r->eval().get_num()) );
 			}
 			else
 			{
-                if (!l || !r) throw base_s3select_exception("missing operand for logical or",base_s3select_exception::FATAL);
+                if (!l || !r) throw base_s3select_exception("missing operand for logical or",base_s3select_exception::s3select_exp_en_t::FATAL);
 				return value( (l->eval().get_num() || r->eval().get_num()) );
 			}
         }
@@ -623,7 +668,7 @@ class mulldiv_operation : public base_statement {
 
 	public:
 
-		typedef enum {NA,MULL,DIV,POW} muldiv_t;
+		enum class muldiv_t {NA,MULL,DIV,POW} ;
 
 	private:
 		base_statement* l;
@@ -640,23 +685,24 @@ class mulldiv_operation : public base_statement {
 
         virtual std::string print(int ident)
         {
-            std::string out = std::string(ident, ' ') + "mulldiv_operation:" += std::to_string(_mulldiv) + "\n" + l->print(ident - 5) + r->print(ident + 5);
-            return out;
+            //std::string out = std::string(ident, ' ') + "mulldiv_operation:" += std::to_string(_mulldiv) + "\n" + l->print(ident - 5) + r->print(ident + 5);
+            //return out;
+            return std::string("#");//TBD
         }
 
         virtual value eval()
         {
             switch (_mulldiv)
             {
-            case MULL:
+            case muldiv_t::MULL:
                 return l->eval() * r->eval();
                 break;
 
-            case DIV:
+            case muldiv_t::DIV:
                 return l->eval() / r->eval();
                 break;
 
-            case POW:
+            case muldiv_t::POW:
                 return l->eval() ^ r->eval();
                 break;
 
@@ -675,7 +721,7 @@ class addsub_operation : public base_statement  {
 
 	public:
 
-		typedef enum {ADD,SUB,NA} addsub_op_t;
+		enum class addsub_op_t {ADD,SUB,NA};
 
 	private:
 		base_statement* l;
@@ -696,20 +742,20 @@ class addsub_operation : public base_statement  {
 
         virtual std::string print(int ident)
         {
-            std::string out = std::string(ident, ' ') + "addsub_operation:" += std::to_string(_op) + "\n" + l->print(ident - 5) + r->print(ident + 5);
-            return out;
+            //std::string out = std::string(ident, ' ') + "addsub_operation:" += std::to_string(_op) + "\n" + l->print(ident - 5) + r->print(ident + 5);
+            return std::string("#");//TBD
         }
 
         virtual value eval()
         {
-            if (_op == NA) // -num , +num , unary-operation on number
+            if (_op == addsub_op_t::NA) // -num , +num , unary-operation on number
             {
                 if (l)
                     return l->eval();
                 else if (r)
                     return r->eval();
             }
-            else if (_op == ADD)
+            else if (_op == addsub_op_t::ADD)
             {
                 return (l->eval() + r->eval()); 
             }
@@ -738,7 +784,7 @@ public:
     virtual ~base_function(){}
 };
 
-typedef enum {ADD,SUM,MIN,MAX,COUNT,TO_INT,TO_FLOAT,SUBSTR} s3select_func_En_t;
+ enum class s3select_func_En_t {ADD,SUM,MIN,MAX,COUNT,TO_INT,TO_FLOAT,SUBSTR};
 
 struct _fn_add : public base_function{
 
@@ -751,7 +797,7 @@ struct _fn_add : public base_function{
 
         value res = x->eval() + y->eval();
         
-        result->_set( res );
+        *result = res; 
 
         return true;
     }
@@ -776,14 +822,14 @@ struct _fn_sum : public base_function
         catch (base_s3select_exception &e)
         {
             std::cout << "illegal value for aggregation(sum). skipping." << std::endl;
-            if (e.severity() == base_s3select_exception::FATAL)
+            if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL)
                 throw;
         }
 
         return true;
     }
 
-    virtual void get_aggregate_result(variable *result) { result->_set(sum); }
+    virtual void get_aggregate_result(variable *result) { *result = sum ;} 
 };
 
 struct _fn_count : public base_function{
@@ -799,7 +845,7 @@ struct _fn_count : public base_function{
         return true;
     }
 
-    virtual void get_aggregate_result(variable*result){result->_set( count );}
+    virtual void get_aggregate_result(variable*result){ *result = value(count);}
     
 };
 
@@ -819,7 +865,7 @@ struct _fn_min : public base_function{
         return true;
     }
 
-    virtual void get_aggregate_result(variable*result){result->_set( min );}
+    virtual void get_aggregate_result(variable*result){ *result = min;}
     
 };
 
@@ -839,7 +885,7 @@ struct _fn_max : public base_function{
         return true;
     }
 
-    virtual void get_aggregate_result(variable*result){result->_set( max );}
+    virtual void get_aggregate_result(variable*result){*result = max;}
     
 };
 
@@ -852,15 +898,15 @@ struct _fn_to_int : public base_function{
         value v = (*args->begin())->eval();
 
         if (v.type == value::value_En_t::STRING)
-                i = strtol(v.__val.str ,&perr ,10) ;//TODO check error before constructor
+                i = strtol(v.str() ,&perr ,10) ;//TODO check error before constructor
         else
         if (v.type == value::value_En_t::FLOAT)
-                i = v.__val.dbl;
+                i = v.dbl();
         else
-                i = v.__val.num;
+                i = v.i64();
         
         value res = value( i );
-        result->_set( res );
+        *result = res ;
 
         return true;
     }
@@ -876,15 +922,15 @@ struct _fn_to_float : public base_function{
         value v = (*args->begin())->eval();
 
         if (v.type == value::value_En_t::STRING)
-                d = strtod(v.__val.str ,&perr) ;//TODO check error before constructor
+                d = strtod(v.str() ,&perr) ;//TODO check error before constructor
         else
         if (v.type == value::value_En_t::FLOAT)
-                d = v.__val.dbl;
+                d = v.dbl();
         else
-                d = v.__val.num;
+                d = v.i64();
         
         value res = value( d );
-        result->_set( res );
+        *result = res;
 
         return true;
     }
@@ -923,7 +969,7 @@ struct _fn_substr : public base_function{
         if(v_str.type != value::value_En_t::STRING)
             throw base_s3select_exception("substr first argument must be string");//can skip current row
 
-        int str_length = strlen(v_str.__val.str);
+        int str_length = strlen(v_str.str());
 
         value v_from = from->eval();
         if(v_from.is_string())
@@ -940,9 +986,9 @@ struct _fn_substr : public base_function{
         }
         
         if (v_from.type == value::value_En_t::FLOAT)
-            f=v_from.__val.dbl;
+            f=v_from.dbl();
         else
-            f=v_from.__val.num;
+            f=v_from.i64();
 
         if (f>str_length)
             throw base_s3select_exception("substr start position is too far");//can skip row
@@ -953,19 +999,19 @@ struct _fn_substr : public base_function{
         if (args_size == 3)
         {
             if (v_from.type == value::value_En_t::FLOAT)
-                t = v_to.__val.dbl;
+                t = v_to.dbl();
             else
-                t = v_to.__val.num;
+                t = v_to.i64();
 
             if( (str_length-(f-1)-t) <0)
                 throw base_s3select_exception("substr length parameter beyond bounderies");//can skip row
 
-            strncpy(buff,v_str.__val.str+f-1,t);
+            strncpy(buff,v_str.str()+f-1,t);
         }
         else 
-            strcpy(buff,v_str.__val.str+f-1);
+            strcpy(buff,v_str.str()+f-1);
         
-        result->_set( value(buff) );
+        *result = value(buff);
 
         return true;
     }
