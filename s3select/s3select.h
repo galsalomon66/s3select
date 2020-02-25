@@ -2,6 +2,7 @@
 #define __S3SELECT__
 
 #include <boost/spirit/include/classic_core.hpp>
+#include <boost/algorithm/string.hpp>
 #include <iostream>
 #include <string>
 #include <list>
@@ -14,19 +15,22 @@ using namespace std;
 using namespace BOOST_SPIRIT_CLASSIC_NS;
 #define _DEBUG_TERM {string  token(a,b);std::cout << __FUNCTION__ << token << std::endl;}
 
+
+namespace s3selectEngine {
+
 /// AST builder
 
 class s3select_projections {
 
     private:
-        list<base_statement *> m_projections;
-    
+        vector<base_statement *> m_projections;
+	
     public:
         bool is_aggregate()
         {
             //TODO iterate on projections , and search for aggregate
             //for(auto p : m_projections){}
-
+	
 	    return false;
         }
 
@@ -36,7 +40,7 @@ class s3select_projections {
             return false;
         }
 
-        list<base_statement *> * get()
+        vector<base_statement *> * get()
         {
             return &m_projections;
         }
@@ -49,17 +53,17 @@ struct actionQ
 // it push it into dedicated queue, later those tokens are poped out to build some "higher" contruct (lets say 1 + 2)
 // those containers are used only for parsing phase and not for runtime.
 
-    list<mulldiv_operation::muldiv_t> muldivQ;
-    list<addsub_operation::addsub_op_t> addsubQ;
-    list<arithmetic_operand::cmp_t> arithmetic_compareQ;
-    list<logical_operand::oplog_t> logical_compareQ;
-    list<base_statement *> exprQ;
-    list<base_statement *> funcQ;
-    list<base_statement *> condQ;
+    vector<mulldiv_operation::muldiv_t> muldivQ;
+    vector<addsub_operation::addsub_op_t> addsubQ;
+    vector<arithmetic_operand::cmp_t> arithmetic_compareQ;
+    vector<logical_operand::oplog_t> logical_compareQ;
+    vector<base_statement *> exprQ;
+    vector<base_statement *> funcQ;
+    vector<base_statement *> condQ;
     std::string from_clause;
-    list<std::string> schema_columns;
+    vector<std::string> schema_columns;
     s3select_projections  projections;
-
+    
 };
 
 class base_action : public __clt_allocator
@@ -502,7 +506,7 @@ struct s3select : public grammar<s3select>
         return m_actionQ.from_clause;
     }
 
-    void load_schema(std::list<string> &scm)
+    void load_schema(std::vector<string> &scm)
     {
         int i = 0;
         for (auto c : scm)
@@ -511,10 +515,12 @@ struct s3select : public grammar<s3select>
 
     base_statement* get_filter()
     {
+        if(m_actionQ.condQ.size()==0) return NULL;
+
         return m_actionQ.condQ.back();
     }
 
-    std::list<base_statement*>  get_projections_list()
+    std::vector<base_statement*>  get_projections_list()
     {
         return *m_actionQ.projections.get(); //TODO return COPY(?) or to return evalaution results (list of class value{}) / return reference(?)
     }
@@ -617,7 +623,6 @@ public:
     virtual ~base_s3object(){}
 };
 
-#include <boost/algorithm/string.hpp>
 
 class csv_object : public base_s3object
 {
@@ -625,7 +630,7 @@ class csv_object : public base_s3object
 private:
   std::vector<std::string> m_csv_lines;
   base_statement *m_where_clause;
-  list<base_statement *> m_projections;
+  vector<base_statement *> m_projections;
   bool m_aggr_flow = false; //TODO once per query
   size_t line_index;
   bool m_is_to_aggregate;
@@ -817,5 +822,7 @@ public:
       return 0;
   }
 };
+
+};//namespace
 
 #endif 

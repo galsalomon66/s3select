@@ -1,6 +1,7 @@
 #include "s3select.h"
 #include <fstream>
 
+using namespace s3selectEngine;
 
 class csv_stream_object : public base_s3object
 {
@@ -11,7 +12,7 @@ class csv_stream_object : public base_s3object
     FILE *m_fp;
     char buff[1024];
     base_statement *m_where_clause;
-    list<base_statement *> m_projections;
+    vector<base_statement *> m_projections;
     bool m_aggr_flow = false; //TODO once per query
 
     int getNextRow(char **tokens) //TODO add delimiter

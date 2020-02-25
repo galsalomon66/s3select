@@ -5,10 +5,13 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <vector>
 #include <string.h>
 #include <math.h>
 
 using namespace std;
+
+namespace s3selectEngine {
 
 class base_s3select_exception
 {
@@ -45,7 +48,7 @@ class s3select_allocator //s3select is the "owner"
 {
     private:
 
-    list<char*> list_of_buff;
+    vector<char*> list_of_buff;
     u_int32_t m_idx;
 
     public:
@@ -124,7 +127,7 @@ private:
     const char *m_columns[128];
     int m_upper_bound;
 
-    list<pair<std::string,int >> m_column_name_pos;
+    vector<pair<std::string,int >> m_column_name_pos;
 
 public:
 
@@ -150,7 +153,7 @@ public:
     int get_column_pos(const char *n)
     {//done only upon building the AST , not on "runtime"
 
-        list<pair<std::string,int >>::iterator iter;
+        vector<pair<std::string,int >>::iterator iter;
         
         for( auto iter : m_column_name_pos)
         {
@@ -395,7 +398,7 @@ public:
 
 };
 
-class base_statement  {
+class base_statement {
 
     protected:
 
@@ -776,7 +779,7 @@ protected:
 
 public:
     //TODO bool semantic() validate number of argument and type
-    virtual bool operator()(list<base_statement *> *args, variable *result) = 0;
+    virtual bool operator()(vector<base_statement *> *args, variable *result) = 0;
     base_function() : aggregate(false) {}
     bool is_aggregate() { return aggregate == true; }
     virtual void get_aggregate_result(variable *) {}
@@ -788,9 +791,9 @@ public:
 
 struct _fn_add : public base_function{
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
-        list<base_statement*>::iterator iter = args->begin();
+        vector<base_statement*>::iterator iter = args->begin();
         base_statement* x =  *iter;
         iter++;
         base_statement* y = *iter;
@@ -810,9 +813,9 @@ struct _fn_sum : public base_function
 
     _fn_sum() : sum(0) { aggregate = true; }
 
-    bool operator()(list<base_statement *> *args, variable *result)
+    bool operator()(vector<base_statement *> *args, variable *result)
     {
-        list<base_statement *>::iterator iter = args->begin();
+        vector<base_statement *>::iterator iter = args->begin();
         base_statement *x = *iter;
 
         try
@@ -838,7 +841,7 @@ struct _fn_count : public base_function{
 
     _fn_count():count(0){aggregate=true;}
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
         count += 1;
 
@@ -855,9 +858,9 @@ struct _fn_min : public base_function{
 
     _fn_min():min(__INT64_MAX__){aggregate=true;}
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
-        list<base_statement*>::iterator iter = args->begin();
+        vector<base_statement*>::iterator iter = args->begin();
         base_statement* x =  *iter;
 
         if(min > x->eval()) min=x->eval();
@@ -875,9 +878,9 @@ struct _fn_max : public base_function{
 
     _fn_max():max(-__INT64_MAX__){aggregate=true;}
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
-        list<base_statement*>::iterator iter = args->begin();
+        vector<base_statement*>::iterator iter = args->begin();
         base_statement* x =  *iter;
 
         if(max < x->eval()) max=x->eval();
@@ -891,7 +894,7 @@ struct _fn_max : public base_function{
 
 struct _fn_to_int : public base_function{
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
         char *perr;
         int64_t i=0;
@@ -915,7 +918,7 @@ struct _fn_to_int : public base_function{
 
 struct _fn_to_float : public base_function{
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
         char *perr;
         double d=0;
@@ -944,9 +947,9 @@ struct _fn_substr : public base_function{
     //should validate result length.
     //TODO may replace by std::string (dynamic) , or to replace with global allocator , in query scope.
 
-    bool operator()(list<base_statement*> * args,variable * result)
+    bool operator()(vector<base_statement*> * args,variable * result)
     {
-        list<base_statement*>::iterator iter = args->begin();
+        vector<base_statement*>::iterator iter = args->begin();
         int args_size = args->size();
 
 
@@ -1101,7 +1104,7 @@ class __function : public base_statement
 {
 
 private:
-    list<base_statement *> arguments;
+    vector<base_statement *> arguments;
     std::string name;
     base_function *m_func_impl;
     s3select_functions *m_s3select_functions;
@@ -1161,7 +1164,7 @@ public:
     }
 
 
-    list<base_statement *> get_arguments()
+    vector<base_statement *> get_arguments()
     {
         return arguments;
     }
@@ -1269,7 +1272,7 @@ bool base_statement::is_binop_aggregate_and_column(base_statement *skip_expressi
     {
 
         __function* f = (dynamic_cast<__function *>(this));
-        list<base_statement*> l = f->get_arguments();
+        vector<base_statement*> l = f->get_arguments();
         for (auto i : l)
         {
             if (i!=skip_expression && i->is_column())
@@ -1280,5 +1283,7 @@ bool base_statement::is_binop_aggregate_and_column(base_statement *skip_expressi
 
     return false;
 }
+
+};
 
 #endif
