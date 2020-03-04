@@ -628,34 +628,27 @@ class csv_object : public base_s3object
 {
 
 private:
-  std::vector<std::string> m_csv_lines;
   base_statement *m_where_clause;
   vector<base_statement *> m_projections;
   bool m_aggr_flow = false; //TODO once per query
-  size_t line_index;
   bool m_is_to_aggregate;
   bool m_skip_last_line;
-  size_t m_total_processed_bytes;
   size_t m_stream_length;
   std::string m_error_description;
+  char * m_stream;
+  char * m_end_stream;
 
   int getNextRow(char **tokens) //TODO add delimiter
-  {                             //purpose: simple csv parser, not handling escape rules
+  {//purpose: simple csv parser, not handling escape rules                             
 
-    if(m_skip_last_line && line_index >= (m_csv_lines.size()-1)) return -1;
-
-    if(line_index >= m_csv_lines.size()) return -1;
-    if(m_csv_lines[line_index].empty()) return -1;
-    
-    m_total_processed_bytes += m_csv_lines[line_index].size()+1;
-    if(m_total_processed_bytes > m_stream_length) return -1;
-
-    char *p = (char *)m_csv_lines[line_index].c_str(); //TODO another boost splitter
+    char * p = m_stream; 
     int i = 0;
-    while (*p)
+    if(p>=m_end_stream) return -1; //end-of-stream
+
+    while ( p<m_end_stream && *p != '\n')
     {
       char *t = p;
-      while (*p && (*(p) != ',')) //TODO delimiter
+      while (p<m_end_stream && (*(p) != ',') && *p != '\n') //TODO delimiter
         p++;
       *p = 0;
       tokens[i++] = t;
@@ -664,25 +657,34 @@ private:
         break; //trimming newline
     }
     tokens[i] = 0; //last token
-    line_index++;
+   
+    m_stream = p + (*p == '\n');
+
+    if(m_skip_last_line && p>=m_end_stream) return -1;
+
     return i;
   }
 
 public:
   csv_object(s3select *s3_query,std::string query,const char *csv_stream,size_t stream_length,bool skip_first_line,bool skip_last_line,bool do_aggregate) : base_s3object(s3_query->get_scratch_area())
   { 
-
+      
     if (s3_query->parse_query(query.c_str()) <0) return;//TODO set error state/description 
 
-    std::string __stream(csv_stream);
-    boost::split(m_csv_lines, __stream, [](char c) { return c == '\n'; }); //splitting the stream (should be 4->128 mb)
-    line_index = (skip_first_line == true ? 1 : 0);
+    m_stream = (char*)csv_stream;
+    m_end_stream = (char*)csv_stream + stream_length;
+
+    if(skip_first_line)
+    {
+        while(*m_stream && (*m_stream != '\n')) m_stream++;
+        m_stream++;//TODO nicer
+    }
+
     m_projections = s3_query->get_projections_list();
     m_where_clause = s3_query->get_filter();
     m_is_to_aggregate = do_aggregate;
     m_skip_last_line = skip_last_line;
 
-    m_total_processed_bytes = (skip_first_line == true ? m_csv_lines[0].size() : 0);
     m_stream_length = stream_length;
 
     if (m_where_clause)
@@ -722,7 +724,7 @@ std::string get_error_description(){return m_error_description;}
 virtual ~csv_object(){}
 
 public:
-  int getMatchRow(std::list<string> &result) //TODO virtual ? getResult
+  int getMatchRow(string &result) //TODO virtual ? getResult
   {
     int number_of_tokens = 0;
     char *row_tokens[128]; //TODO typedef for it
@@ -739,7 +741,7 @@ public:
                 for (auto i : m_projections)
                 {
                     i->set_last_call();
-                    result.push_back((i->eval().to_string()));
+                    result.append( i->eval().to_string() );
                 }
 
           return number_of_tokens;
@@ -774,19 +776,21 @@ public:
 
       for (auto i : m_projections)
       {
-        result.push_back(i->eval().to_string());
+        result.append( i->eval().to_string() );
+        result.append(",");
       }
+      result.append("\n");
     }
 
     return number_of_tokens; //TODO wrong
   }
 
-  int run_s3select_on_object(std::string &o_result)
+  int run_s3select_on_object(std::string &result)
   {
 
       do
       {
-          std::list<string> result;
+
           int num = 0;
           try
           {
@@ -798,20 +802,6 @@ public:
               m_error_description = e.what();
               if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL)//abort query execution
                   return -1;
-          }
-
-          for (std::list<string>::iterator it = result.begin(); it != result.end(); it++)
-          {
-              if (std::next(it) != result.end())
-              {
-                  o_result.append(*it);
-                  o_result.append(",");
-              }
-              else
-              {
-                  o_result.append(*it);
-                  o_result.append("\n");
-              }
           }
 
           if (num < 0)

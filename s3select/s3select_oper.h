@@ -224,6 +224,7 @@ public:
 
 private:
     value_t __val;
+    std::string m_to_string;
 
 public:
     enum class value_En_t
@@ -253,17 +254,20 @@ public:
 
     int64_t get_num(){return __val.num;}
 
-    std::string to_string(){//TODO very intensive , must improve this
+    std::string & to_string(){//TODO very intensive , must improve this
 
         if (type != value_En_t::STRING){
                 if (type == value_En_t::DECIMAL){
-                        return std::to_string(__val.num);
+			            m_to_string = std::to_string(__val.num); 
                 }else {
-                        return std::to_string(__val.dbl);
+                        m_to_string = std::to_string(__val.dbl);
+			
                 }
         }else{
-            return __val.str;
+            m_to_string.assign( __val.str );
         }
+
+	return m_to_string;
     }
 
     value & operator=(const value & o)
@@ -464,16 +468,17 @@ private:
     int column_pos;
     value var_value;
     std::string m_star_op_result;
+    char m_star_op_result_charc[4096]; //TODO should be dynamic
 
 public:
     
-    //variable():m_var_type(NA),_name("#"){}
+    variable():m_var_type(var_t::NA),_name(""),column_pos(-1){}
 
-    variable(int64_t i) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
+    variable(int64_t i) : m_var_type(var_t::COL_VALUE), column_pos(-1),var_value(i){}
 
     variable(double d) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1),var_value(d){}
 
-    variable(int i) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1),var_value(i){}
+    variable(int i) : m_var_type(var_t::COL_VALUE), column_pos(-1),var_value(i){}
 
     variable(const std::string & n) : m_var_type(var_t::VAR), _name(n), column_pos(-1){}
 
@@ -521,17 +526,30 @@ public:
 
     const char * star_operation(){ //purpose return content of all columns in a input stream
 
-        m_star_op_result.clear();
 
 	int i;
+    size_t pos=0;
         int num_of_columns = m_scratch->get_num_of_columns();
         for(i=0;i<num_of_columns-1;i++)
         {
-            m_star_op_result += std::string(m_scratch->get_column_value(i)) + ',' ;
-        }
-        m_star_op_result += std::string(m_scratch->get_column_value(i)) ;
+            size_t len = strlen(m_scratch->get_column_value(i));
+            if((pos+len)>sizeof(m_star_op_result_charc))
+                throw base_s3select_exception("result line too long",base_s3select_exception::s3select_exp_en_t::FATAL);
 
-        return m_star_op_result.c_str();
+            memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i), len);
+            pos += len;
+            m_star_op_result_charc[ pos ] = ',';//TODO need for another abstraction (per file type)
+            pos ++;
+
+        }
+
+        size_t len = strlen(m_scratch->get_column_value(i));
+        if((pos+len)>sizeof(m_star_op_result_charc))
+                throw base_s3select_exception("result line too long",base_s3select_exception::s3select_exp_en_t::FATAL);
+
+        memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i),len);
+        m_star_op_result_charc[ pos + len ] = 0;
+        return m_star_op_result_charc;
     }
 
     virtual value eval()
@@ -1108,6 +1126,7 @@ private:
     std::string name;
     base_function *m_func_impl;
     s3select_functions *m_s3select_functions;
+    variable m_result;
 
     void _resolve_name()
     {
@@ -1145,13 +1164,12 @@ public:
 
         _resolve_name();
 
-        variable result(0); //TODO create variable::NA
         if (is_last_call == false)
-            (*m_func_impl)(&arguments, &result);
+            (*m_func_impl)(&arguments, &m_result);
         else
-            (*m_func_impl).get_aggregate_result(&result);
+            (*m_func_impl).get_aggregate_result(&m_result);
 
-        return result.get_value();
+        return m_result.get_value();
     }
 
 
