@@ -137,7 +137,7 @@ public:
 
                 m_sa->update((const char **)row_tokens, number_of_tokens);
 
-                if (!m_where_clause || m_where_clause->eval().get_num() == true)
+                if (!m_where_clause || m_where_clause->eval().i64() == true)
                     for (auto i : m_projections)
                                         i->eval();
 
@@ -154,7 +154,7 @@ public:
                     return number_of_tokens;
 
                 m_sa->update((const char **)row_tokens, number_of_tokens);
-            } while (m_where_clause && m_where_clause->eval().get_num() == false);
+            } while (m_where_clause && m_where_clause->eval().i64() == false);
 
             for (auto i : m_projections)
             {
@@ -242,7 +242,7 @@ int test_value(int argc,char **argv)
 }
 #endif
 
-int main(int argc, char **argv)
+int test_1(int argc, char **argv)
 {
     //purpose: demostrate the s3select functionalities
     s3select s3select_syntax;
@@ -304,4 +304,78 @@ int main(int argc, char **argv)
 
         } while (1);
     }
+
+    return 0;
+}
+
+
+int main(int argc,char **argv)
+{
+
+    //purpose: demostrate the s3select functionalities
+    s3select s3select_syntax;
+
+    char *input_schema = 0, *input_query = 0;
+
+    for (int i = 0; i < argc; i++)
+    {
+        if (!strcmp(argv[i], "-s"))
+            input_schema = argv[i + 1];
+        if (!strcmp(argv[i], "-q"))
+            input_query = argv[i + 1];
+    }
+
+    actionQ scm;
+    if (input_schema && cli_get_schema(input_schema, scm) < 0)
+    {
+        std::cout << "input schema is wrong" << std::endl;
+        return -1;
+    }
+
+    if (!input_query)
+    {
+        std::cout << "type -q 'select ... from ...  '" << std::endl;
+        return -1;
+    }
+
+    s3select_syntax.load_schema(scm.schema_columns);
+
+    bool to_aggregate = false;
+
+    s3select_syntax.parse_query(input_query);
+
+    std::string object_name = s3select_syntax.get_from_clause(); //TODO stdin
+
+    FILE * fp;
+
+    if (object_name.compare("stdin")==0)
+    {
+        fp = stdin;
+    }
+    else
+    {
+        fp  = fopen(object_name.c_str(),"r");
+    }
+    
+    
+    std::string s3select_result;
+
+    while(1)
+    {
+        char buff[4096];
+        char * in = fgets(buff,sizeof(buff),fp);
+        size_t input_sz = in == 0 ? 0 : strlen(in);
+
+        if (!in) to_aggregate = true;
+
+        s3selectEngine::csv_object  s3_csv_object(&s3select_syntax ,input_query ,in ,input_sz ,false ,false ,to_aggregate);
+        s3_csv_object.run_s3select_on_object(s3select_result);
+        if(s3select_result.size()>1) std::cout << s3select_result;
+
+        s3select_result = "";
+        if(!in) break;
+
+    }
+
+    
 }

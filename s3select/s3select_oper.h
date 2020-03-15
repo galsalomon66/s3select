@@ -8,6 +8,7 @@
 #include <vector>
 #include <string.h>
 #include <math.h>
+#include <boost/lexical_cast.hpp>
 
 using namespace std;
 
@@ -252,13 +253,13 @@ public:
     }
     bool is_string() const { return type == value_En_t::STRING; }
 
-    int64_t get_num(){return __val.num;}
 
     std::string & to_string(){//TODO very intensive , must improve this
 
         if (type != value_En_t::STRING){
                 if (type == value_En_t::DECIMAL){
-			            m_to_string = std::to_string(__val.num); 
+			            //m_to_string = std::to_string(__val.num); 
+			            m_to_string.assign( boost::lexical_cast<std::string>(__val.num) );
                 }else {
                         m_to_string = std::to_string(__val.dbl);
 			
@@ -274,6 +275,22 @@ public:
     {
         this->__val = o.__val;
         this->type = o.type;
+
+	return *this;
+    }
+
+    value & operator=(char * s)
+    {
+        this->__val.str = (char*)s;
+        this->type = value_En_t::STRING;
+
+	return *this;
+    }
+
+    value & operator=(int64_t i)
+    {
+        this->__val.num = i;
+        this->type = value_En_t::DECIMAL;
 
 	return *this;
     }
@@ -323,13 +340,37 @@ public:
         throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
     }
 
-    //intensive runtime operations
-    friend bool operator<(const value &l , const value &r) // need a friend ...
+    bool operator>(const value &v) //basic compare operator , most itensive runtime operation 
     {
-            return (value)l<(value)r; //TODO reolve the segfault (remove casting)
+            //TODO NA possible?
+        if (is_string() && v.is_string())
+            return strcmp(__val.str, v.__val.str) > 0;
+        
+        if (is_number() && v.is_number()){
+
+            if(type != v.type){ //conversion //TODO find better way
+                    if (type == value_En_t::DECIMAL){
+                            return (double)__val.num > v.__val.dbl;
+                    }
+                    else {
+                            return __val.dbl > (double)v.__val.num;
+                    }
+            }
+            else { //no conversion
+                if(type == value_En_t::DECIMAL){
+                            return __val.num > v.__val.num;
+                }
+                else{
+                            return __val.dbl > v.__val.dbl;
+                }
+                
+            }
+        }
+
+        throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
     }
 
-    bool operator>(const value &v)  {return v < *this;}
+
     bool operator<=(const value &v)  {return !(*this>v);}
     bool operator>=(const value &v)  {return !(*this<v);}
     bool operator==(const value &v)  {return !(*this<v) && !(*this>v);} //TODO not efficient. need specific implementation
@@ -411,7 +452,7 @@ class base_statement {
 
 	public:
         base_statement():m_scratch(0),is_last_call(false){}
-        virtual value eval() =0;
+        virtual value & eval() =0;
         virtual base_statement* left() {return 0;}
         virtual base_statement* right() {return 0;}       
 		virtual std::string print(int ident) =0;//TODO complete it, one option to use level parametr in interface , 
@@ -524,7 +565,7 @@ public:
     virtual value::value_En_t get_value_type() {return var_value.type;}
 
 
-    const char * star_operation(){ //purpose return content of all columns in a input stream
+    value & star_operation(){ //purpose return content of all columns in a input stream
 
 
 	int i;
@@ -549,10 +590,11 @@ public:
 
         memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i),len);
         m_star_op_result_charc[ pos + len ] = 0;
-        return m_star_op_result_charc;
+        var_value = (char*)&m_star_op_result_charc[0];
+	return var_value;
     }
 
-    virtual value eval()
+    virtual value & eval()
     {
         if (m_var_type == var_t::COL_VALUE) //return value
             return var_value;           // could be deciml / float / string ; its input stream
@@ -561,7 +603,8 @@ public:
         else if (column_pos == -1)
             column_pos = m_scratch->get_column_pos(_name.c_str()); //done once , for the first time
 
-        return value(m_scratch->get_column_value(column_pos));//no allocation. returning pointer of allocated space 
+        var_value = (char*)m_scratch->get_column_value(column_pos);//no allocation. returning pointer of allocated space 
+        return var_value;
     }
 
     virtual std::string print(int ident)
@@ -586,6 +629,7 @@ class arithmetic_operand : public base_statement {
 		base_statement* r;
 
 		cmp_t _cmp;
+        value var_value;
 
 	public:
 
@@ -601,32 +645,32 @@ class arithmetic_operand : public base_statement {
             return std::string("#");//TBD
 	}
         
-        virtual value eval(){
+        virtual value & eval(){
 
 			switch (_cmp)
 			{
 				case cmp_t::EQ:
-					return (l->eval() == r->eval());
+					return var_value = (l->eval() == r->eval());
 					break;
 
 				case cmp_t::LE:
-					return (l->eval() <= r->eval());
+					return var_value = (l->eval() <= r->eval());
 					break;
 
 				case cmp_t::GE:
-					return (l->eval() >= r->eval());
+					return var_value = (l->eval() >= r->eval());
 					break;
 
 				case cmp_t::NE:
-					return (l->eval() != r->eval());
+					return var_value = (l->eval() != r->eval());
 					break;
 
 				case cmp_t::GT:
-					return (l->eval() > r->eval());
+					return var_value = (l->eval() > r->eval());
 					break;
 
 				case cmp_t::LT:
-					return (l->eval() < r->eval());
+					return var_value = (l->eval() < r->eval());
 					break;
 
 				default:
@@ -651,6 +695,7 @@ class logical_operand : public base_statement  {
 		base_statement* r;
 
 		oplog_t _oplog;
+        value var_value;
 
 	public:
 
@@ -669,17 +714,17 @@ class logical_operand : public base_statement  {
             //return out;
             return std::string("#");//TBD
         }
-        virtual value eval()
+        virtual value & eval()
         {
             if (_oplog == oplog_t::AND)
 			{
                 if (!l || !r) throw base_s3select_exception("missing operand for logical and",base_s3select_exception::s3select_exp_en_t::FATAL);
-				return value( (l->eval().get_num() && r->eval().get_num()) );
+				return var_value =  (l->eval().i64() && r->eval().i64());
 			}
 			else
 			{
                 if (!l || !r) throw base_s3select_exception("missing operand for logical or",base_s3select_exception::s3select_exp_en_t::FATAL);
-				return value( (l->eval().get_num() || r->eval().get_num()) );
+				return var_value =  (l->eval().i64() || r->eval().i64());
 			}
         }
 
@@ -696,6 +741,7 @@ class mulldiv_operation : public base_statement {
 		base_statement* r;
 
 		muldiv_t _mulldiv;
+        value var_value;
 
 	public:
 
@@ -711,20 +757,20 @@ class mulldiv_operation : public base_statement {
             return std::string("#");//TBD
         }
 
-        virtual value eval()
+        virtual value & eval()
         {
             switch (_mulldiv)
             {
             case muldiv_t::MULL:
-                return l->eval() * r->eval();
+                return var_value = l->eval() * r->eval();
                 break;
 
             case muldiv_t::DIV:
-                return l->eval() / r->eval();
+                return var_value = l->eval() / r->eval();
                 break;
 
             case muldiv_t::POW:
-                return l->eval() ^ r->eval();
+                return var_value = l->eval() ^ r->eval();
                 break;
 
             default:
@@ -749,6 +795,7 @@ class addsub_operation : public base_statement  {
 		base_statement* r;
 
 		addsub_op_t _op;
+        value var_value;
 
 	public:
 
@@ -767,25 +814,25 @@ class addsub_operation : public base_statement  {
             return std::string("#");//TBD
         }
 
-        virtual value eval()
+        virtual value & eval()
         {
             if (_op == addsub_op_t::NA) // -num , +num , unary-operation on number
             {
                 if (l)
-                    return l->eval();
+                    return var_value = l->eval();
                 else if (r)
-                    return r->eval();
+                    return var_value = r->eval();
             }
             else if (_op == addsub_op_t::ADD)
             {
-                return (l->eval() + r->eval()); 
+                return var_value = (l->eval() + r->eval()); 
             }
             else
             {
-                return (l->eval() - r->eval());
+                return var_value = (l->eval() - r->eval());
             }
 	
-		return value();
+		    return var_value = value();
         }
 };
 
@@ -809,6 +856,8 @@ public:
 
 struct _fn_add : public base_function{
 
+    value var_result;
+
     bool operator()(vector<base_statement*> * args,variable * result)
     {
         vector<base_statement*>::iterator iter = args->begin();
@@ -816,9 +865,9 @@ struct _fn_add : public base_function{
         iter++;
         base_statement* y = *iter;
 
-        value res = x->eval() + y->eval();
+        var_result = x->eval() + y->eval();
         
-        *result = res; 
+        *result = var_result; 
 
         return true;
     }
@@ -912,22 +961,25 @@ struct _fn_max : public base_function{
 
 struct _fn_to_int : public base_function{
 
+    value var_result;
+    value func_arg;
+
     bool operator()(vector<base_statement*> * args,variable * result)
     {
         char *perr;
         int64_t i=0;
-        value v = (*args->begin())->eval();
+        func_arg = (*args->begin())->eval();
 
-        if (v.type == value::value_En_t::STRING)
-                i = strtol(v.str() ,&perr ,10) ;//TODO check error before constructor
+        if (func_arg.type == value::value_En_t::STRING)
+                i = strtol(func_arg.str() ,&perr ,10) ;//TODO check error before constructor
         else
-        if (v.type == value::value_En_t::FLOAT)
-                i = v.dbl();
+        if (func_arg.type == value::value_En_t::FLOAT)
+                i = func_arg.dbl();
         else
-                i = v.i64();
+                i = func_arg.i64();
         
-        value res = value( i );
-        *result = res ;
+        var_result =  i ;
+        *result =  var_result;
 
         return true;
     }
@@ -935,6 +987,8 @@ struct _fn_to_int : public base_function{
 };
 
 struct _fn_to_float : public base_function{
+
+    value var_result;
 
     bool operator()(vector<base_statement*> * args,variable * result)
     {
@@ -950,8 +1004,8 @@ struct _fn_to_float : public base_function{
         else
                 d = v.i64();
         
-        value res = value( d );
-        *result = res;
+        var_result = d;
+        *result = var_result;
 
         return true;
     }
@@ -1160,7 +1214,7 @@ public:
 
     __function(const char *fname, s3select_functions* s3f) : name(fname), m_func_impl(0),m_s3select_functions(s3f) {}
 
-    virtual value eval(){
+    virtual value & eval(){
 
         _resolve_name();
 

@@ -742,6 +742,7 @@ public:
                 {
                     i->set_last_call();
                     result.append( i->eval().to_string() );
+                    result.append(",");
                 }
 
           return number_of_tokens;
@@ -755,7 +756,7 @@ public:
 
         m_sa->update((const char **)row_tokens, number_of_tokens);
 
-        if (!m_where_clause || m_where_clause->eval().get_num() == true)
+        if (!m_where_clause || m_where_clause->eval().i64() == true)
           for (auto i : m_projections)
             i->eval();
 
@@ -772,7 +773,7 @@ public:
           return number_of_tokens;
 
         m_sa->update((const char **)row_tokens, number_of_tokens);
-      } while (m_where_clause && m_where_clause->eval().get_num() == false);
+      } while (m_where_clause && m_where_clause->eval().i64() == false);
 
       for (auto i : m_projections)
       {
