@@ -615,7 +615,6 @@ protected:
     std::string m_obj_name;
 
 public:
-    //base_s3object(const char *obj_name, scratch_area *m) : m_sa(m), m_obj_name(obj_name) {}
     base_s3object(scratch_area *m) : m_sa(m), m_obj_name("") {}
 
     void set(scratch_area *m)
@@ -623,7 +622,6 @@ public:
         m_sa = m;
         m_obj_name = "";
     }
-    //virtual int getNextRow(char **) = 0; //fetch next row
 
     virtual ~base_s3object(){}
 };
@@ -645,7 +643,6 @@ private:
     std::vector<std::string_view> m_row_tokens{128};
     s3select * m_s3_select;
 
-    //int getNextRow(std::vector<std::string_view> & tokens) //TODO add delimiter
     int getNextRow() //TODO add delimiter
     {                //purpose: simple csv parser, not handling escape rules
 
@@ -717,12 +714,12 @@ public:
             }
     }
 
-  csv_object(s3select *s3_query) : m_s3_select(s3_query), base_s3object(s3_query->get_scratch_area()) 
+  csv_object(s3select *s3_query) :  base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
   { 
       set(s3_query);
   }
 
-  csv_object(): m_s3_select(0),base_s3object(0){}
+  csv_object(): base_s3object(0),m_s3_select(0){}
   
 
 std::string get_error_description(){return m_error_description;}
@@ -735,8 +732,7 @@ public:
   int getMatchRow(string &result) //TODO virtual ? getResult
   {
     int number_of_tokens = 0;
-    //char *row_tokens[128]; //TODO typedef for it
-    //std::vector<std::string_view> row_tokens{128};
+
 
     if (m_aggr_flow == true)
     {
@@ -763,7 +759,7 @@ public:
             throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::s3select_exp_en_t::FATAL);
         }
 
-        m_sa->update(m_row_tokens);
+        m_sa->update(m_row_tokens,number_of_tokens);
 
         if (!m_where_clause || m_where_clause->eval().i64() == true)
           for (auto i : m_projections)
@@ -781,7 +777,7 @@ public:
         if (number_of_tokens < 0)
           return number_of_tokens;
 
-        m_sa->update(m_row_tokens);
+        m_sa->update(m_row_tokens,number_of_tokens);
       } while (m_where_clause && m_where_clause->eval().i64() == false);
 
       for (auto i : m_projections)

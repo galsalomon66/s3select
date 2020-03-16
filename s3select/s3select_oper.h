@@ -125,7 +125,6 @@ class scratch_area
 {
 
 private:
-    //const char *m_columns[128];
     std::vector<std::string_view> m_columns{128};
     int m_upper_bound;
 
@@ -138,30 +137,17 @@ public:
         m_column_name_pos.push_back( pair<const char*,int>(n,pos));
     }
 
-    //void update(const char **tokens, int num_of_tokens)
-    void update(std::vector<std::string_view> & tokens)
+    void update(std::vector<std::string_view> & tokens,size_t num_of_tokens)
     {
-        //if (num_of_tokens > (int)(sizeof(m_columns)/sizeof(char*))) 
-        //        throw base_s3select_exception("too_many_tokens");
-
-        //m_upper_bound = tokens.size();//TODO not correct
-
-        //for (int i = 0; i < num_of_tokens; i++)
-
-        int i=0;
+        size_t i=0;
         for(auto s : tokens)
         {
-            if(s.size())//TODO not correct , could be NULL's in columns ; should use number of tokens
-            {
-                m_columns[i++] = s;  // TODO not to copy all vector 
-            }
-            else
-            {
-                m_upper_bound = i;
-                break;
-            }
+                if (i>=num_of_tokens) break;
+
+                m_columns[i++] = s;
         }
-        //TODO m_columns[i]=0;
+        m_upper_bound = i;
+
     }
 
     int get_column_pos(const char *n)
