@@ -365,6 +365,7 @@ int main(int argc,char **argv)
     
     
     std::string s3select_result;
+    s3selectEngine::csv_object  s3_csv_object(&s3select_syntax);
 
     while(1)
     {
@@ -374,8 +375,10 @@ int main(int argc,char **argv)
 
         if (!in) to_aggregate = true;
 
-        s3selectEngine::csv_object  s3_csv_object(&s3select_syntax ,input_query ,in ,input_sz ,false ,false ,to_aggregate);
-        s3_csv_object.run_s3select_on_object(s3select_result);
+        
+        //s3_csv_object.run_s3select_on_object(s3select_result);
+        s3_csv_object.run_s3select_on_object(s3select_result,in,input_sz,false,false,to_aggregate);
+
         if(s3select_result.size()>1) std::cout << s3select_result;
 
         s3select_result = "";

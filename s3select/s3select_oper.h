@@ -139,7 +139,7 @@ public:
     }
 
     //void update(const char **tokens, int num_of_tokens)
-    void update(std::vector<std::string_view> tokens)
+    void update(std::vector<std::string_view> & tokens)
     {
         //if (num_of_tokens > (int)(sizeof(m_columns)/sizeof(char*))) 
         //        throw base_s3select_exception("too_many_tokens");

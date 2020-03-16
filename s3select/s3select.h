@@ -615,9 +615,14 @@ protected:
     std::string m_obj_name;
 
 public:
-    base_s3object(const char *obj_name, scratch_area *m) : m_sa(m), m_obj_name(obj_name) {}
+    //base_s3object(const char *obj_name, scratch_area *m) : m_sa(m), m_obj_name(obj_name) {}
     base_s3object(scratch_area *m) : m_sa(m), m_obj_name("") {}
 
+    void set(scratch_area *m)
+    {
+        m_sa = m;
+        m_obj_name = "";
+    }
     //virtual int getNextRow(char **) = 0; //fetch next row
 
     virtual ~base_s3object(){}
@@ -628,114 +633,117 @@ class csv_object : public base_s3object
 {
 
 private:
-  base_statement *m_where_clause;
-  vector<base_statement *> m_projections;
-  bool m_aggr_flow = false; //TODO once per query
-  bool m_is_to_aggregate;
-  bool m_skip_last_line;
-  size_t m_stream_length;
-  std::string m_error_description;
-  char * m_stream;
-  char * m_end_stream;
+    base_statement *m_where_clause;
+    vector<base_statement *> m_projections;
+    bool m_aggr_flow = false; //TODO once per query
+    bool m_is_to_aggregate;
+    bool m_skip_last_line;
+    size_t m_stream_length;
+    std::string m_error_description;
+    char *m_stream;
+    char *m_end_stream;
+    std::vector<std::string_view> m_row_tokens{128};
+    s3select * m_s3_select;
 
-  int getNextRow(std::vector<std::string_view> & tokens) //TODO add delimiter
-  {//purpose: simple csv parser, not handling escape rules                             
+    //int getNextRow(std::vector<std::string_view> & tokens) //TODO add delimiter
+    int getNextRow() //TODO add delimiter
+    {                //purpose: simple csv parser, not handling escape rules
 
-    char * p = m_stream; 
-    int i = 0;
-    if(p>=m_end_stream) return -1; //end-of-stream
+        char *p = m_stream;
+        int i = 0;
+        if (p >= m_end_stream)
+            return -1; //end-of-stream
 
-    while ( p<m_end_stream && *p != '\n')
-    {
-      char *t = p;
-      while (p<m_end_stream && (*(p) != ',') && *p != '\n') //TODO delimiter
-        p++;
-      *p = 0;
-      tokens[i++] = t;
-      p++;
-      if (*t == 10)
-        break; //trimming newline
-    }
-    tokens[i] = 0; //last token
-   
-    m_stream = p + (*p == '\n');
+        while (p < m_end_stream && *p != '\n')
+        {
+            char *t = p;
+            while (p < m_end_stream && (*(p) != ',') && *p != '\n') //TODO delimiter
+                p++;
+            *p = 0;
+            m_row_tokens[i++] = t;
+            p++;
+            if (*t == 10)
+                break; //trimming newline
+        }
+        m_row_tokens[i] = 0; //last token
 
-    if(m_skip_last_line && p>=m_end_stream) return -1;
+        m_stream = p + (*p == '\n');
 
-    return i;
+        if (m_skip_last_line && p >= m_end_stream)
+            return -1;
+
+        return i;
   }
 
 public:
-  csv_object(s3select *s3_query,std::string query,const char *csv_stream,size_t stream_length,bool skip_first_line,bool skip_last_line,bool do_aggregate) : base_s3object(s3_query->get_scratch_area())
+
+    void set(s3select *s3_query)
+    {
+        m_s3_select = s3_query;
+        base_s3object::set(m_s3_select->get_scratch_area());
+
+        m_projections = m_s3_select->get_projections_list();
+        m_where_clause = m_s3_select->get_filter();
+
+        if (m_where_clause)
+            m_where_clause->traverse_and_apply(m_sa);
+
+        for (auto p : m_projections)
+            p->traverse_and_apply(m_sa);
+
+        for (auto e : m_projections) //TODO for tests only, should be in semantic
+        {
+            base_statement *aggr = 0;
+
+            if ((aggr = e->get_aggregate()) != 0)
+            {
+                if (aggr->is_nested_aggregate(aggr))
+                {
+                    throw base_s3select_exception("nested aggregation function is illegal i.e. sum(...sum ...)", base_s3select_exception::s3select_exp_en_t::FATAL);
+                }
+
+                m_aggr_flow = true;
+            }
+        }
+        if (m_aggr_flow == true)
+            for (auto e : m_projections)
+            {
+                base_statement *skip_expr = e->get_aggregate();
+
+                if (e->is_binop_aggregate_and_column(skip_expr))
+                {
+                    throw base_s3select_exception("illegal expression. /select sum(c1) + c1 ..../ is not allow type of query", base_s3select_exception::s3select_exp_en_t::FATAL);
+                }
+            }
+    }
+
+  csv_object(s3select *s3_query) : m_s3_select(s3_query), base_s3object(s3_query->get_scratch_area()) 
   { 
-      
-    if (s3_query->parse_query(query.c_str()) <0) return;//TODO set error state/description 
-
-    m_stream = (char*)csv_stream;
-    m_end_stream = (char*)csv_stream + stream_length;
-
-    if(skip_first_line)
-    {
-        while(*m_stream && (*m_stream != '\n')) m_stream++;
-        m_stream++;//TODO nicer
-    }
-
-    m_projections = s3_query->get_projections_list();
-    m_where_clause = s3_query->get_filter();
-    m_is_to_aggregate = do_aggregate;
-    m_skip_last_line = skip_last_line;
-
-    m_stream_length = stream_length;
-
-    if (m_where_clause)
-      m_where_clause->traverse_and_apply(m_sa);
-
-    for (auto p : m_projections)
-      p->traverse_and_apply(m_sa);
-
-    for (auto e : m_projections) //TODO for tests only, should be in semantic
-    {
-      base_statement *aggr = 0;
-
-      if ((aggr = e->get_aggregate()) != 0)
-      {
-        if (aggr->is_nested_aggregate(aggr))
-        {
-          throw base_s3select_exception("nested aggregation function is illegal i.e. sum(...sum ...)", base_s3select_exception::s3select_exp_en_t::FATAL);
-        }
-
-        m_aggr_flow = true;
-      }
-    }
-    if (m_aggr_flow == true)
-      for (auto e : m_projections)
-      {
-        base_statement *skip_expr = e->get_aggregate();
-
-        if (e->is_binop_aggregate_and_column(skip_expr))
-        {
-          throw base_s3select_exception("illegal expression. /select sum(c1) + c1 ..../ is not allow type of query", base_s3select_exception::s3select_exp_en_t::FATAL);
-        }
-      }
+      set(s3_query);
   }
+
+  csv_object(): m_s3_select(0),base_s3object(0){}
+  
 
 std::string get_error_description(){return m_error_description;}
 
 virtual ~csv_object(){}
 
 public:
+    
+    
   int getMatchRow(string &result) //TODO virtual ? getResult
   {
     int number_of_tokens = 0;
     //char *row_tokens[128]; //TODO typedef for it
-    std::vector<std::string_view> row_tokens{128};
+    //std::vector<std::string_view> row_tokens{128};
 
     if (m_aggr_flow == true)
     {
       do
       {
 
-        number_of_tokens = getNextRow(row_tokens);
+        number_of_tokens = getNextRow();
         if (number_of_tokens < 0) //end of stream
         {
             if (m_is_to_aggregate)
@@ -755,7 +763,7 @@ public:
             throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::s3select_exp_en_t::FATAL);
         }
 
-        m_sa->update(row_tokens);
+        m_sa->update(m_row_tokens);
 
         if (!m_where_clause || m_where_clause->eval().i64() == true)
           for (auto i : m_projections)
@@ -769,11 +777,11 @@ public:
       do
       {
 
-        number_of_tokens = getNextRow(row_tokens);
+        number_of_tokens = getNextRow();
         if (number_of_tokens < 0)
           return number_of_tokens;
 
-        m_sa->update(row_tokens);
+        m_sa->update(m_row_tokens);
       } while (m_where_clause && m_where_clause->eval().i64() == false);
 
       for (auto i : m_projections)
@@ -787,8 +795,22 @@ public:
     return number_of_tokens; //TODO wrong
   }
 
-  int run_s3select_on_object(std::string &result)
+  int run_s3select_on_object(std::string &result,const char *csv_stream,size_t stream_length,bool skip_first_line,bool skip_last_line,bool do_aggregate)
   {
+
+    
+    m_stream = (char*)csv_stream;
+    m_end_stream = (char*)csv_stream + stream_length;
+    m_is_to_aggregate = do_aggregate;
+    m_skip_last_line = skip_last_line;
+
+    m_stream_length = stream_length;
+
+    if(skip_first_line)
+    {
+        while(*m_stream && (*m_stream != '\n')) m_stream++;
+        m_stream++;//TODO nicer
+    }
 
       do
       {
