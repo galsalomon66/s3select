@@ -125,7 +125,8 @@ class scratch_area
 {
 
 private:
-    const char *m_columns[128];
+    //const char *m_columns[128];
+    std::vector<std::string_view> m_columns{128};
     int m_upper_bound;
 
     vector<pair<std::string,int >> m_column_name_pos;
@@ -137,16 +138,28 @@ public:
         m_column_name_pos.push_back( pair<const char*,int>(n,pos));
     }
 
-    void update(const char **tokens, int num_of_tokens)
+    //void update(const char **tokens, int num_of_tokens)
+    void update(std::vector<std::string_view> tokens)
     {
-        if (num_of_tokens > (int)(sizeof(m_columns)/sizeof(char*))) 
-                throw base_s3select_exception("too_many_tokens");
+        //if (num_of_tokens > (int)(sizeof(m_columns)/sizeof(char*))) 
+        //        throw base_s3select_exception("too_many_tokens");
 
-        m_upper_bound = num_of_tokens;
+        //m_upper_bound = tokens.size();//TODO not correct
 
-        for (int i = 0; i < num_of_tokens; i++)
+        //for (int i = 0; i < num_of_tokens; i++)
+
+        int i=0;
+        for(auto s : tokens)
         {
-            m_columns[i] = tokens[i];
+            if(s.size())//TODO not correct , could be NULL's in columns ; should use number of tokens
+            {
+                m_columns[i++] = s;  // TODO not to copy all vector 
+            }
+            else
+            {
+                m_upper_bound = i;
+                break;
+            }
         }
         //TODO m_columns[i]=0;
     }
@@ -164,7 +177,7 @@ public:
         throw base_s3select_exception("column_name_not_in_schema");
     }
 
-    const char* get_column_value(int column_pos)
+    std::string_view get_column_value(int column_pos)
     {
     
         if ((column_pos >= m_upper_bound) || column_pos < 0) 
@@ -573,22 +586,22 @@ public:
         int num_of_columns = m_scratch->get_num_of_columns();
         for(i=0;i<num_of_columns-1;i++)
         {
-            size_t len = strlen(m_scratch->get_column_value(i));
+            size_t len = m_scratch->get_column_value(i).size();
             if((pos+len)>sizeof(m_star_op_result_charc))
                 throw base_s3select_exception("result line too long",base_s3select_exception::s3select_exp_en_t::FATAL);
 
-            memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i), len);
+            memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i).data(), len);
             pos += len;
             m_star_op_result_charc[ pos ] = ',';//TODO need for another abstraction (per file type)
             pos ++;
 
         }
 
-        size_t len = strlen(m_scratch->get_column_value(i));
+        size_t len = m_scratch->get_column_value(i).size();
         if((pos+len)>sizeof(m_star_op_result_charc))
                 throw base_s3select_exception("result line too long",base_s3select_exception::s3select_exp_en_t::FATAL);
 
-        memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i),len);
+        memcpy(&m_star_op_result_charc[pos],m_scratch->get_column_value(i).data(),len);
         m_star_op_result_charc[ pos + len ] = 0;
         var_value = (char*)&m_star_op_result_charc[0];
 	return var_value;
@@ -603,7 +616,7 @@ public:
         else if (column_pos == -1)
             column_pos = m_scratch->get_column_pos(_name.c_str()); //done once , for the first time
 
-        var_value = (char*)m_scratch->get_column_value(column_pos);//no allocation. returning pointer of allocated space 
+        var_value = (char*)m_scratch->get_column_value(column_pos).data();//no allocation. returning pointer of allocated space 
         return var_value;
     }
 

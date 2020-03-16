@@ -3,6 +3,7 @@
 
 using namespace s3selectEngine;
 
+#if USING_CSV_STREAM_OBJECT
 class csv_stream_object : public base_s3object
 {
 
@@ -166,6 +167,8 @@ public:
     }
 };
 
+#endif
+
 int cli_get_schema(const char *input_schema, actionQ &x)
 {
     g_push_column.set_action_q(&x);
@@ -242,6 +245,7 @@ int test_value(int argc,char **argv)
 }
 #endif
 
+#if 0
 int test_1(int argc, char **argv)
 {
     //purpose: demostrate the s3select functionalities
@@ -307,6 +311,8 @@ int test_1(int argc, char **argv)
 
     return 0;
 }
+
+#endif
 
 
 int main(int argc,char **argv)

@@ -618,7 +618,7 @@ public:
     base_s3object(const char *obj_name, scratch_area *m) : m_sa(m), m_obj_name(obj_name) {}
     base_s3object(scratch_area *m) : m_sa(m), m_obj_name("") {}
 
-    virtual int getNextRow(char **) = 0; //fetch next row
+    //virtual int getNextRow(char **) = 0; //fetch next row
 
     virtual ~base_s3object(){}
 };
@@ -638,7 +638,7 @@ private:
   char * m_stream;
   char * m_end_stream;
 
-  int getNextRow(char **tokens) //TODO add delimiter
+  int getNextRow(std::vector<std::string_view> & tokens) //TODO add delimiter
   {//purpose: simple csv parser, not handling escape rules                             
 
     char * p = m_stream; 
@@ -727,7 +727,8 @@ public:
   int getMatchRow(string &result) //TODO virtual ? getResult
   {
     int number_of_tokens = 0;
-    char *row_tokens[128]; //TODO typedef for it
+    //char *row_tokens[128]; //TODO typedef for it
+    std::vector<std::string_view> row_tokens{128};
 
     if (m_aggr_flow == true)
     {
@@ -754,7 +755,7 @@ public:
             throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::s3select_exp_en_t::FATAL);
         }
 
-        m_sa->update((const char **)row_tokens, number_of_tokens);
+        m_sa->update(row_tokens);
 
         if (!m_where_clause || m_where_clause->eval().i64() == true)
           for (auto i : m_projections)
@@ -772,7 +773,7 @@ public:
         if (number_of_tokens < 0)
           return number_of_tokens;
 
-        m_sa->update((const char **)row_tokens, number_of_tokens);
+        m_sa->update(row_tokens);
       } while (m_where_clause && m_where_clause->eval().i64() == false);
 
       for (auto i : m_projections)
