@@ -14,7 +14,7 @@ The engine is using boost::spirit to define the grammar , and by that building t
 The hierarchy(levels) of the different objects also define their role, i.e. function could be a finite expression, or an argument for an expression, or an argument for other functions, and so forth.
 
 Bellow is an example for “SQL” statement been parsed and transform into AST.
-![alt text](/s3select/s3select-parse-s.png)
+![alt text](/s3select-parse-s.png)
 
 The where-clause is boolean expression made of arithmetic expression building blocks.
 
