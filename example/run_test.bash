@@ -92,7 +92,10 @@ $("$PREFIX"/generate_rand_csv 10000 10 | "$PREFIX"/s3select_example -q 'select s
 
 ###############################################################
 
-expr_test
-aggregate_test
+#expr_test
+#aggregate_test
 
-rm tmp.c a.out
+#rm tmp.c a.out
+
+exit 0
+

@@ -190,28 +190,6 @@ int cli_get_schema(const char *input_schema, actionQ &x)
 #if 0
 int test_value(int argc,char **argv)
 {
-    {
-    value a(10),b(11);
-
-    printf("a>b :: %d , a<b :: %d , a>=b :: %d  , a<=b :: %d , a==b :: %d , a!=b :: %d    { %d,%d } \n", a>b , a<b , a>=b , a<=b , a==b , a!=b , a.__val.num , b.__val.num);
-    }
-
-    {
-    value a(10),b(11),c((a==b));
-    printf("c = %d    %d\n",c.__val.num , value(a<b).__val.num );
-    }
-    
-    {
-    value a(10),b(10.0);
-
-    printf("a>b :: %d , a<b :: %d , a>=b :: %d  , a<=b :: %d , a==b :: %d , a!=b :: %d    { %d,%f } \n", a>b , a<b , a>=b , a<=b , a==b , a!=b , a.__val.num , b.__val.dbl);
-    }
-
-    {
-    value a(strdup("abcd")),b(strdup("abcd"));
-
-    printf("a>b :: %d , a<b :: %d , a>=b :: %d  , a<=b :: %d , a==b :: %d , a!=b :: %d    { %s , %s } \n", a>b , a<b , a>=b , a<=b , a==b , a!=b , a.__val.str , b.__val.str);
-    }
 
     {
         value a(2), b(10.1);
