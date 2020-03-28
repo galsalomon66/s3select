@@ -3,172 +3,6 @@
 
 using namespace s3selectEngine;
 
-#if USING_CSV_STREAM_OBJECT
-class csv_stream_object : public base_s3object
-{
-
-    private:
-
-    bool is_object_open;
-    FILE *m_fp;
-    char buff[1024];
-    base_statement *m_where_clause;
-    vector<base_statement *> m_projections;
-    bool m_aggr_flow = false; //TODO once per query
-
-    int getNextRow(char **tokens) //TODO add delimiter
-    {//purpose: simple csv parser, not handling escape rules
-               
-        if (is_object_open == false)
-        {
-            if (m_obj_name.compare("stdin") != 0)
-            {
-
-                m_fp = fopen(m_obj_name.c_str(), "r");
-            }
-            else
-            {
-                m_fp = fdopen(0, "r");
-            }
-
-            if (!m_fp)
-                throw base_s3select_exception("fail_to_open_csv");
-            is_object_open = true;
-        }
-
-        char *st = fgets(buff, sizeof(buff), m_fp);
-        if (!st)
-        {
-            if (m_obj_name.compare("stdin") != 0)
-                fclose(m_fp);
-            return -1;
-        }
-        
-        char *p = buff;
-        int i = 0;
-        while (*p)
-        {
-            char *t = p;
-            while (*p && (*(p) != ',')) //TODO delimiter
-                p++;
-            *p = 0;
-            tokens[i++] = t;
-            p++;
-            if (*t==10) break;//trimming newline
-        }
-        tokens[i-1] = 0; //last token
-        return i-1;
-    }
-    
-public:
-    csv_stream_object(s3select *s3_query) : base_s3object(s3_query->get_from_clause().c_str(), s3_query->get_scratch_area())
-    {
-        is_object_open = false;
-        m_fp = 0;
-        m_projections = s3_query->get_projections_list();
-        m_where_clause = s3_query->get_filter();
-
-        //TODO projection is '*'
-        if (m_where_clause)
-            m_where_clause->traverse_and_apply(m_sa);
-
-        for (auto p : m_projections)
-            p->traverse_and_apply(m_sa);
-
-        for (auto e : m_projections) //TODO for tests only, should be in semantic
-        {
-            base_statement *aggr = 0;
-
-            if ((aggr = e->get_aggregate()) != 0)
-            {
-                if (aggr->is_nested_aggregate(aggr))
-                {
-                    throw base_s3select_exception("nested aggregation function is illegal i.e. sum(...sum ...)", base_s3select_exception::s3select_exp_en_t::FATAL);
-                }
-
-                m_aggr_flow = true;
-            }
-        }
-        if (m_aggr_flow == true)
-            for (auto e : m_projections)
-            {
-                base_statement *skip_expr = e->get_aggregate();
-
-                if (e->is_binop_aggregate_and_column(skip_expr))
-                {
-                    throw base_s3select_exception("illegal expression. /select sum(c1) + c1 ..../ is not allow type of query", base_s3select_exception::s3select_exp_en_t::FATAL);
-                }
-            }
-
-#if 0
-        if (m_aggr_flow == true)
-        {
-            std::cout << "aggregated query" << std::endl;
-        }
-        else
-        {
-            std::cout << "not aggregated query" << std::endl;
-        }
-        //exit(0);
-#endif
-    }
-
-
-public:
-    int getMatchRow(std::list<string> &result) //TODO virtual ? getResult
-    {
-        int number_of_tokens = 0;
-        char *row_tokens[128]; //TODO typedef for it     
-
-        if (m_aggr_flow == true)
-        {
-            do
-            {
-
-                number_of_tokens = getNextRow(row_tokens);
-                if (number_of_tokens < 0) //end of stream
-                {
-                    for (auto i : m_projections)
-                    {
-                        i->set_last_call();
-                        result.push_back((i->eval().to_string()));
-                    }
-                    return number_of_tokens;
-                }
-
-                m_sa->update((const char **)row_tokens, number_of_tokens);
-
-                if (!m_where_clause || m_where_clause->eval().i64() == true)
-                    for (auto i : m_projections)
-                                        i->eval();
-
-            } while (1);
-        }
-        else
-        {
-
-            do
-            {
-
-                number_of_tokens = getNextRow(row_tokens);
-                if (number_of_tokens < 0)
-                    return number_of_tokens;
-
-                m_sa->update((const char **)row_tokens, number_of_tokens);
-            } while (m_where_clause && m_where_clause->eval().i64() == false);
-
-            for (auto i : m_projections)
-            {
-                result.push_back(i->eval().to_string() );
-            }
-        }
-
-        return number_of_tokens; //TODO wrong
-    }
-};
-
-#endif
-
 int cli_get_schema(const char *input_schema, actionQ &x)
 {
     g_push_column.set_action_q(&x);
@@ -186,112 +20,6 @@ int cli_get_schema(const char *input_schema, actionQ &x)
 
     return 0;
 }
-
-#if 0
-int test_value(int argc,char **argv)
-{
-
-    {
-        value a(2), b(10.1);
-        std::cout << "a+b  = " << (a + b).__val.dbl << std::endl;
-    }
-
-    {
-        value a(2), b(10.1);
-        std::cout << "a-b  = " << (a - b).__val.dbl << std::endl;
-    }
-
-    {
-        value a(2), b(10.1);
-        std::cout << "a*b  = " << (a * b).__val.dbl << std::endl;
-    }
-
-    {
-        value a(2.0), b(10.0);
-        std::cout << "a/b  = " << (a / b).__val.dbl << std::endl;
-        std::cout << "a/b  = " << (a / b).__val.num << std::endl;
-    }
-
-    {
-        value a(2), b(10);
-        std::cout << "a ^ b  = " << (a ^ b).__val.dbl << std::endl;
-    }
-    {
-        value a(2), b(10);
-        std::cout << "a ^ b  = " << (a ^ b).__val.num << std::endl;
-    }
-}
-#endif
-
-#if 0
-int test_1(int argc, char **argv)
-{
-    //purpose: demostrate the s3select functionalities
-    s3select s3select_syntax;
-
-    char *input_schema = 0, *input_query = 0;
-
-    for (int i = 0; i < argc; i++)
-    {
-        if (!strcmp(argv[i], "-s"))
-            input_schema = argv[i + 1];
-        if (!strcmp(argv[i], "-q"))
-            input_query = argv[i + 1];
-    }
-
-    actionQ scm;
-    if (input_schema && cli_get_schema(input_schema, scm) < 0)
-    {
-        std::cout << "input schema is wrong" << std::endl;
-        return -1;
-    }
-
-    if (!input_query)
-    {
-        std::cout << "type -q 'select ... from ...  '" << std::endl;
-        return -1;
-    }
-
-    s3select_syntax.load_schema(scm.schema_columns);
-
-    if (s3select_syntax.parse_query(input_query)<0) {std::cout << s3select_syntax.get_error_description();return -1;}
-
-    {
-        csv_stream_object my_input(&s3select_syntax);
-
-        do
-        {
-            std::list<string> result;
-            int num = 0;
-            try
-            {
-                num = my_input.getMatchRow(result);
-            }
-            catch (base_s3select_exception e)
-            {
-                std::cout << e.what() << std::endl;
-                if (e.severity() == base_s3select_exception::s3select_exp_en_t::NONE)
-                    return -1;
-            }
-            for (std::list<string>::iterator it = result.begin(); it != result.end(); it++)
-            {
-                if (std::next(it) != result.end())
-                    std::cout << *it << ",";
-                else
-                    std::cout << *it << std::endl;
-            }
-
-            if (num < 0)
-                break;
-
-        } while (1);
-    }
-
-    return 0;
-}
-
-#endif
-
 
 int main(int argc,char **argv)
 {
@@ -326,7 +54,12 @@ int main(int argc,char **argv)
 
     bool to_aggregate = false;
 
-    s3select_syntax.parse_query(input_query);
+    int status = s3select_syntax.parse_query(input_query);
+    if (status != 0)
+	{
+		std::cout << "failed to parse query " << s3select_syntax.get_error_description() << std::endl;
+		return -1;
+	}
 
     std::string object_name = s3select_syntax.get_from_clause(); //TODO stdin
 
@@ -341,7 +74,13 @@ int main(int argc,char **argv)
         fp  = fopen(object_name.c_str(),"r");
     }
     
-    
+   
+    if(!fp)
+    {
+		std::cout << " input stream is not valid, abort;" << std::endl;
+		return -1;
+    } 
+
     std::string s3select_result;
     s3selectEngine::csv_object  s3_csv_object(&s3select_syntax);
 
@@ -354,8 +93,12 @@ int main(int argc,char **argv)
         if (!in) to_aggregate = true;
 
         
-        //s3_csv_object.run_s3select_on_object(s3select_result);
-        s3_csv_object.run_s3select_on_object(s3select_result,in,input_sz,false,false,to_aggregate);
+        int status = s3_csv_object.run_s3select_on_object(s3select_result,in,input_sz,false,false,to_aggregate);
+	if(status<0)
+	{
+		std::cout << "failure on execution " << std::endl;
+		break;
+	}
 
         if(s3select_result.size()>1) std::cout << s3select_result;
 

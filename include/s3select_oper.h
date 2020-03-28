@@ -29,12 +29,12 @@ private:
     s3select_exp_en_t m_severity;
 
 public:
-    const char *_msg;
-    base_s3select_exception(const char *n) : m_severity(s3select_exp_en_t::NONE) { _msg = n; }
-    base_s3select_exception(const char *n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n; }
-    base_s3select_exception(std::string n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n.c_str(); } 
+    std::string _msg;
+    base_s3select_exception(const char *n) : m_severity(s3select_exp_en_t::NONE) { _msg.assign(n); }
+    base_s3select_exception(const char *n, s3select_exp_en_t severity) : m_severity(severity) { _msg.assign(n); }
+    base_s3select_exception(std::string n, s3select_exp_en_t severity) : m_severity(severity) { _msg = n; } 
 
-    virtual const char *what() { return _msg; }
+    virtual const char *what() { return _msg.c_str(); }
 
     s3select_exp_en_t severity() { return m_severity; }
 
@@ -160,7 +160,7 @@ public:
             if (!strcmp(iter.first.c_str(),n)) return iter.second;
         }
 
-        throw base_s3select_exception("column_name_not_in_schema");
+        return -1;
     }
 
     std::string_view get_column_value(int column_pos)
@@ -175,6 +175,46 @@ public:
     int get_num_of_columns(){
         return m_upper_bound;
     }
+};
+
+class base_statement;
+class projection_alias {
+//purpose: mapping between alias-name to base_statement*
+//those routines are *NOT* intensive, works once per query parse time.
+
+    private:
+        std::vector< pair<std::string,base_statement *> > alias_map;
+
+    public:
+        std::vector< pair<std::string,base_statement *> > * get()
+        {
+            return &alias_map;
+        }
+
+        bool insert_new_entry(std::string alias_name, base_statement* bs)
+        {//purpose: only unique alias names.
+
+            for(auto alias: alias_map)
+            {
+                if(alias.first.compare(alias_name) == 0)
+                    return false; //alias name already exist
+
+            }
+            pair<std::string,base_statement *> new_alias(alias_name,bs);
+            alias_map.push_back(new_alias);
+            
+            return true;
+        }
+
+        base_statement* search_alias(std::string alias_name)
+        {
+            for(auto alias: alias_map)
+            {
+                if(alias.first.compare(alias_name) == 0)
+                    return alias.second;//refernce to execution node
+            }
+            return 0;
+        }
 };
 
 struct binop_plus {
@@ -447,22 +487,28 @@ class base_statement {
     protected:
 
     scratch_area *m_scratch;
+    projection_alias *m_aliases;
     bool is_last_call; //valid only for aggregation functions
+    bool m_is_cache_result;
+    value m_alias_result;
+    base_statement* m_projection_alias;
 
 	public:
-        base_statement():m_scratch(0),is_last_call(false){}
+        base_statement():m_scratch(0),is_last_call(false),m_is_cache_result(false),m_projection_alias(0){}
         virtual value & eval() =0;
         virtual base_statement* left() {return 0;}
         virtual base_statement* right() {return 0;}       
 		virtual std::string print(int ident) =0;//TODO complete it, one option to use level parametr in interface , 
-        virtual bool semantic() =0;//done once , post syntax , traverse all nodes and validate semantics. 
-        virtual void traverse_and_apply(scratch_area *sa)
+        virtual bool semantic() =0;//done once , post syntax , traverse all nodes and validate semantics.
+
+        virtual void traverse_and_apply(scratch_area *sa,projection_alias *pa)
         {
             m_scratch = sa;
+            m_aliases = pa;
             if (left())
-                left()->traverse_and_apply(m_scratch);
+                left()->traverse_and_apply(m_scratch,m_aliases);
             if (right())
-                right()->traverse_and_apply(m_scratch);
+                right()->traverse_and_apply(m_scratch,m_aliases);
         }
 
         virtual bool is_aggregate(){return false;}
@@ -482,6 +528,27 @@ class base_statement {
         }
 
         bool is_set_last_call(){return is_last_call;}
+
+        void invalidate_cache_result()
+        {
+            m_is_cache_result = false;
+        }
+
+        bool is_result_cached()
+        {
+            return m_is_cache_result == true;
+        }
+
+        void set_result_cache(value & eval_result)
+        {
+            m_alias_result = eval_result;
+            m_is_cache_result = true;
+        }
+
+        value & get_result_cache()
+        {
+            return m_alias_result;
+        }
 
         virtual ~base_statement(){}
 
@@ -510,8 +577,10 @@ private:
     std::string m_star_op_result;
     char m_star_op_result_charc[4096]; //TODO should be dynamic
 
-public:
-    
+    const int undefined_column_pos = -1;
+    const int column_alias = -2;
+
+public:    
     variable():m_var_type(var_t::NA),_name(""),column_pos(-1){}
 
     variable(int64_t i) : m_var_type(var_t::COL_VALUE), column_pos(-1),var_value(i){}
@@ -599,10 +668,37 @@ public:
             return var_value;           // could be deciml / float / string ; its input stream
         else if(m_var_type == var_t::STAR_OPERATION)
             return star_operation();
-        else if (column_pos == -1)
-            column_pos = m_scratch->get_column_pos(_name.c_str()); //done once , for the first time
+        else if (column_pos == undefined_column_pos)
+        { //done once , for the first time
+            column_pos = m_scratch->get_column_pos(_name.c_str());
 
-        var_value = (char*)m_scratch->get_column_value(column_pos).data();//no allocation. returning pointer of allocated space 
+            if (column_pos == undefined_column_pos)
+            {//not belong to schema , should exist in aliases 
+                m_projection_alias = m_aliases->search_alias(_name.c_str());
+
+                //not enter this scope again
+                column_pos = column_alias;
+                if(m_projection_alias == 0)
+                {
+                    throw base_s3select_exception(std::string("alias ")+_name+std::string(" or column not exist in schema"),base_s3select_exception::s3select_exp_en_t::FATAL);
+                }               
+            }
+            
+        }
+
+        if (m_projection_alias)
+        {
+            if (m_projection_alias->is_result_cached() == false)
+            {
+                var_value = m_projection_alias->eval();
+                m_projection_alias->set_result_cache(var_value);
+            }
+            else
+                var_value = m_projection_alias->get_result_cache();        
+        }
+        else
+            var_value = (char*)m_scratch->get_column_value(column_pos).data();//no allocation. returning pointer of allocated space 
+
         return var_value;
     }
 
@@ -1193,12 +1289,13 @@ private:
     }
 
 public:
-    virtual void traverse_and_apply(scratch_area *sa)
+    virtual void traverse_and_apply(scratch_area *sa,projection_alias *pa)
     {
         m_scratch = sa;
+        m_aliases = pa;
         for (base_statement *ba : arguments)
         {
-            ba->traverse_and_apply(sa);
+            ba->traverse_and_apply(sa,pa);
         }
     }
 

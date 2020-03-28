@@ -60,6 +60,7 @@ struct actionQ
     vector<base_statement *> exprQ;
     vector<base_statement *> funcQ;
     vector<base_statement *> condQ;
+    projection_alias alias_map;
     std::string from_clause;
     vector<std::string> schema_columns;
     s3select_projections  projections;
@@ -401,6 +402,27 @@ struct push_projection : public base_action
 };
 static push_projection g_push_projection;
 
+struct push_alias_projection : public base_action
+{
+    void operator()(const char *a,const char *b) const
+    {
+        string token(a, b);
+        //extract alias name
+        const char *p=b;while(*(--p) != ' '); 
+        std::string alias_name(p+1,b);
+        base_statement*  bs = m_action->exprQ.back();
+
+        //mapping alias name to base-statement
+        bool res = m_action->alias_map.insert_new_entry(alias_name,bs); 
+        if (res==false)
+            throw base_s3select_exception(std::string("alias <")+alias_name+std::string("> is already been used in query"),base_s3select_exception::s3select_exp_en_t::FATAL);
+
+        m_action->projections.get()->push_back( bs );
+        m_action->exprQ.pop_back();
+    }
+
+};
+static push_alias_projection g_push_alias_projection;
 
 /// for the schema description "mini-parser"
 struct push_column : public base_action
@@ -451,14 +473,24 @@ struct s3select : public grammar<s3select>
         {
             if(get_projections_list().empty() == false) return 0;//already parsed
 
-            parse_info<> info = boost::spirit::classic::parse(input_query, *this, space_p);
-            auto  query_parse_position = info.stop;
-
-            if (!info.full)
+            try
             {
-                std::cout << "failure -->" << query_parse_position << "<---" << std::endl;
-                error_description = std::string("failure -->") + query_parse_position + std::string("<---");
-                return -1;
+                parse_info<> info = boost::spirit::classic::parse(input_query, *this, space_p);
+                auto query_parse_position = info.stop;
+
+                if (!info.full)
+                {
+                    std::cout << "failure -->" << query_parse_position << "<---" << std::endl;
+                    error_description = std::string("failure -->") + query_parse_position + std::string("<---");
+                    return -1;
+                }
+            }
+            catch (base_s3select_exception &e)
+            {
+                std::cout << e.what() << std::endl;
+                error_description.assign(e.what());
+                if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL) //abort query execution
+                    return -1;
             }
 
             return 0;
@@ -487,6 +519,7 @@ struct s3select : public grammar<s3select>
         ATTACH_ACTION_Q(push_variable);
         ATTACH_ACTION_Q(push_column_pos);
         ATTACH_ACTION_Q(push_projection);
+        ATTACH_ACTION_Q(push_alias_projection);
         ATTACH_ACTION_Q(push_debug_1);
 
         error_description.clear();
@@ -530,6 +563,11 @@ struct s3select : public grammar<s3select>
         return &m_sca;
     }
 
+    projection_alias* get_aliases()
+    {
+        return &m_actionQ.alias_map;
+    }
+
     ~s3select(){}
 
 
@@ -543,7 +581,7 @@ struct s3select : public grammar<s3select>
             
             projections = projection_expression >> *( ',' >> projection_expression) ;
 
-            projection_expression = (arithmetic_expression >> str_p("as") >> alias_name) | (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)]  ;
+            projection_expression = (arithmetic_expression >> str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] | (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)]  ;
 
             alias_name = lexeme_d[(+alpha_p >> *digit_p)] ;
 
@@ -683,10 +721,10 @@ public:
         m_where_clause = m_s3_select->get_filter();
 
         if (m_where_clause)
-            m_where_clause->traverse_and_apply(m_sa);
+            m_where_clause->traverse_and_apply(m_sa,m_s3_select->get_aliases());
 
         for (auto p : m_projections)
-            p->traverse_and_apply(m_sa);
+            p->traverse_and_apply(m_sa,m_s3_select->get_aliases());
 
         for (auto e : m_projections) //TODO for tests only, should be in semantic
         {
@@ -760,6 +798,8 @@ public:
         }
 
         m_sa->update(m_row_tokens,number_of_tokens);
+        for (auto a : *m_s3_select->get_aliases()->get())
+            a.second->invalidate_cache_result();
 
         if (!m_where_clause || m_where_clause->eval().i64() == true)
           for (auto i : m_projections)
@@ -777,7 +817,10 @@ public:
         if (number_of_tokens < 0)
           return number_of_tokens;
 
-        m_sa->update(m_row_tokens,number_of_tokens);
+        m_sa->update(m_row_tokens, number_of_tokens);
+        for (auto a : *m_s3_select->get_aliases()->get())
+            a.second->invalidate_cache_result();
+
       } while (m_where_clause && m_where_clause->eval().i64() == false);
 
       for (auto i : m_projections)
