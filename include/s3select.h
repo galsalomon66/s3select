@@ -11,7 +11,6 @@
 #include <boost/bind.hpp>
 #include <functional>
 
-using namespace std;
 using namespace BOOST_SPIRIT_CLASSIC_NS;
 #define _DEBUG_TERM {string  token(a,b);std::cout << __FUNCTION__ << token << std::endl;}
 
@@ -23,7 +22,7 @@ namespace s3selectEngine {
 class s3select_projections {
 
     private:
-        vector<base_statement *> m_projections;
+        std::vector<base_statement *> m_projections;
 	
     public:
         bool is_aggregate()
@@ -40,7 +39,7 @@ class s3select_projections {
             return false;
         }
 
-        vector<base_statement *> * get()
+        std::vector<base_statement *> * get()
         {
             return &m_projections;
         }
@@ -53,16 +52,16 @@ struct actionQ
 // it push it into dedicated queue, later those tokens are poped out to build some "higher" contruct (lets say 1 + 2)
 // those containers are used only for parsing phase and not for runtime.
 
-    vector<mulldiv_operation::muldiv_t> muldivQ;
-    vector<addsub_operation::addsub_op_t> addsubQ;
-    vector<arithmetic_operand::cmp_t> arithmetic_compareQ;
-    vector<logical_operand::oplog_t> logical_compareQ;
-    vector<base_statement *> exprQ;
-    vector<base_statement *> funcQ;
-    vector<base_statement *> condQ;
+    std::vector<mulldiv_operation::muldiv_t> muldivQ;
+    std::vector<addsub_operation::addsub_op_t> addsubQ;
+    std::vector<arithmetic_operand::cmp_t> arithmetic_compareQ;
+    std::vector<logical_operand::oplog_t> logical_compareQ;
+    std::vector<base_statement *> exprQ;
+    std::vector<base_statement *> funcQ;
+    std::vector<base_statement *> condQ;
     projection_alias alias_map;
     std::string from_clause;
-    vector<std::string> schema_columns;
+    std::vector<std::string> schema_columns;
     s3select_projections  projections;
     
 };
@@ -93,7 +92,7 @@ struct push_number : public base_action //TODO use define for defintion of actio
 {
     void operator()(const char *a, const char *b) const
     {
-        string token(a, b);
+        std::string token(a, b);
         variable *v = S3SELECT_NEW( variable , atoi(token.c_str())); 
 
 
@@ -108,7 +107,7 @@ struct push_float_number : public base_action //TODO use define for defintion of
 
     void operator()(const char *a, const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
 
         //the parser for float(real_p) is accepting also integers, thus "blocking" integer acceptence and all are float.
         parse_info<> info = parse(token.c_str(), int_p, space_p);
@@ -138,7 +137,7 @@ struct push_string : public base_action //TODO use define for defintion of actio
     void operator()(const char *a, const char *b) const
     {
         a++;b--;// remove double quotes
-        string token(a, b);
+         std::string token(a, b);
         
         variable *v = S3SELECT_NEW(variable,token,variable::var_t::COL_VALUE );
 
@@ -152,7 +151,7 @@ struct push_variable : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
 
         variable *v = S3SELECT_NEW(variable, token);
 
@@ -166,7 +165,7 @@ struct push_addsub : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
 
         if (token.compare("+") == 0)
             m_action->addsubQ.push_back(addsub_operation::addsub_op_t::ADD);
@@ -180,7 +179,7 @@ struct push_mulop : public base_action
 {
     void operator()(const char *a, const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
 
         if (token.compare("*") == 0)
             m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::MULL);
@@ -278,7 +277,7 @@ struct push_compare_operator : public base_action
 {
     void operator()(const char *a,const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
         arithmetic_operand::cmp_t c = arithmetic_operand::cmp_t::NA;
 
         if (token.compare("==") == 0)
@@ -305,7 +304,7 @@ struct push_logical_operator : public base_action
 {
     void operator()(const char *a,const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
         logical_operand::oplog_t l = logical_operand::oplog_t::NA;
 
         if (token.compare("and") == 0)
@@ -325,7 +324,7 @@ struct push_arithmetic_predicate : public base_action
 {
     void operator()(const char *a,const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
 
         base_statement *vr, *vl;
         arithmetic_operand::cmp_t c = m_action->arithmetic_compareQ.back();
@@ -347,7 +346,7 @@ struct push_logical_predicate : public base_action
 
     void operator()(const char *a,const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
 
         base_statement *tl = 0, *tr = 0;
         logical_operand::oplog_t oplog = m_action->logical_compareQ.back();
@@ -375,7 +374,7 @@ struct push_column_pos : public base_action
 {
     void operator()(const char *a,const char *b) const
     { 
-        string token(a, b);
+        std::string token(a, b);
         variable *v;
 
         if (token.compare("*") == 0 || token.compare("* ")==0) //TODO space should skip in boost::spirit
@@ -393,7 +392,7 @@ struct push_projection : public base_action
 {
     void operator()(const char *a,const char *b) const
     {
-        string token(a, b);
+        std::string token(a, b);
 
         m_action->projections.get()->push_back( m_action->exprQ.back() );
         m_action->exprQ.pop_back();
@@ -406,7 +405,7 @@ struct push_alias_projection : public base_action
 {
     void operator()(const char *a,const char *b) const
     {
-        string token(a, b);
+         std::string token(a, b);
         //extract alias name
         const char *p=b;while(*(--p) != ' '); 
         std::string alias_name(p+1,b);
@@ -416,6 +415,7 @@ struct push_alias_projection : public base_action
         bool res = m_action->alias_map.insert_new_entry(alias_name,bs); 
         if (res==false)
             throw base_s3select_exception(std::string("alias <")+alias_name+std::string("> is already been used in query"),base_s3select_exception::s3select_exp_en_t::FATAL);
+        
 
         m_action->projections.get()->push_back( bs );
         m_action->exprQ.pop_back();
@@ -453,9 +453,9 @@ struct s3select : public grammar<s3select>
 {
     private:
 
-    actionQ m_actionQ; //TODO on heap
+    actionQ m_actionQ;
 
-    scratch_area m_sca;//TODO on heap
+    scratch_area m_sca;
 
     s3select_functions m_s3select_functions;
 
@@ -463,11 +463,46 @@ struct s3select : public grammar<s3select>
 
     s3select_allocator m_s3select_allocator;
 
+    bool aggr_flow;
 
     #define BOOST_BIND_ACTION( push_name ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2)
     #define ATTACH_ACTION_Q( push_name ) {(g_ ## push_name).set_action_q(&m_actionQ); (g_ ## push_name).set_s3select_functions(&m_s3select_functions); (g_ ## push_name).set(&m_s3select_allocator);}
 
     public:
+
+       
+        int semantic()
+        {
+            for (auto e : get_projections_list())
+            {
+                base_statement *aggr = 0;
+
+                if ((aggr = e->get_aggregate()) != 0)
+                {
+                    if (aggr->is_nested_aggregate(aggr))
+                    {
+                        error_description = "nested aggregation function is illegal i.e. sum(...sum ...)";
+                        throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
+                    }
+
+                    aggr_flow = true;
+                }
+            }
+
+            if (aggr_flow == true)
+                for (auto e : get_projections_list())
+                {
+                    base_statement *skip_expr = e->get_aggregate();
+
+                    if (e->is_binop_aggregate_and_column(skip_expr))
+                    {
+                        error_description = "illegal expression. /select sum(c1) + c1 ..../ is not allow type of query";
+                        throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
+                    }
+                }
+
+            return 0;
+        }
 
         int parse_query(const char *input_query)
         {
@@ -484,6 +519,8 @@ struct s3select : public grammar<s3select>
                     error_description = std::string("failure -->") + query_parse_position + std::string("<---");
                     return -1;
                 }
+
+                semantic();
             }
             catch (base_s3select_exception &e)
             {
@@ -525,6 +562,8 @@ struct s3select : public grammar<s3select>
         error_description.clear();
 
         m_s3select_functions.set(&m_s3select_allocator);
+
+        aggr_flow = false;
     }
 
     bool is_semantic()//TBD traverse and validate semantics per all nodes
@@ -539,7 +578,7 @@ struct s3select : public grammar<s3select>
         return m_actionQ.from_clause;
     }
 
-    void load_schema(std::vector<string> &scm)
+    void load_schema(std::vector< std::string> &scm)
     {
         int i = 0;
         for (auto c : scm)
@@ -566,6 +605,11 @@ struct s3select : public grammar<s3select>
     projection_alias* get_aliases()
     {
         return &m_actionQ.alias_map;
+    }
+
+    bool is_aggregate_query()
+    {
+        return aggr_flow == true;
     }
 
     ~s3select(){}
@@ -670,7 +714,7 @@ class csv_object : public base_s3object
 
 private:
     base_statement *m_where_clause;
-    vector<base_statement *> m_projections;
+    std::vector<base_statement *> m_projections;
     bool m_aggr_flow = false; //TODO once per query
     bool m_is_to_aggregate;
     bool m_skip_last_line;
@@ -726,30 +770,7 @@ public:
         for (auto p : m_projections)
             p->traverse_and_apply(m_sa,m_s3_select->get_aliases());
 
-        for (auto e : m_projections) //TODO for tests only, should be in semantic
-        {
-            base_statement *aggr = 0;
-
-            if ((aggr = e->get_aggregate()) != 0)
-            {
-                if (aggr->is_nested_aggregate(aggr))
-                {
-                    throw base_s3select_exception("nested aggregation function is illegal i.e. sum(...sum ...)", base_s3select_exception::s3select_exp_en_t::FATAL);
-                }
-
-                m_aggr_flow = true;
-            }
-        }
-        if (m_aggr_flow == true)
-            for (auto e : m_projections)
-            {
-                base_statement *skip_expr = e->get_aggregate();
-
-                if (e->is_binop_aggregate_and_column(skip_expr))
-                {
-                    throw base_s3select_exception("illegal expression. /select sum(c1) + c1 ..../ is not allow type of query", base_s3select_exception::s3select_exp_en_t::FATAL);
-                }
-            }
+        m_aggr_flow = m_s3_select->is_aggregate_query();
     }
 
   csv_object(s3select *s3_query) :  base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
@@ -767,7 +788,7 @@ virtual ~csv_object(){}
 public:
     
     
-  int getMatchRow(string &result) //TODO virtual ? getResult
+  int getMatchRow( std::string &result) //TODO virtual ? getResult
   {
     int number_of_tokens = 0;
 

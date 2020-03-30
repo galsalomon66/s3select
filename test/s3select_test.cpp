@@ -61,29 +61,29 @@ private:
 	int open = 0;
 	std::string oper={"+-+*/*"};
 
-	string gexpr()
+	std::string gexpr()
 	{
-		return to_string(rand() % 1000) + ".0" + OPER + to_string(rand() % 1000) + ".0";
+		return std::to_string(rand() % 1000) + ".0" + OPER + std::to_string(rand() % 1000) + ".0";
 	}
 
-	string g_openp()
+	std::string g_openp()
 	{
 		if ((rand() % 3) == 0)
 		{
 			open++;
-			return string("(");
+			return std::string("(");
 		}
-		return string("");
+		return std::string("");
 	}
 
-	string g_closep()
+	std::string g_closep()
 	{
 		if ((rand() % 2) == 0 && open > 0)
 		{
 			open--;
-			return string(")");
+			return std::string(")");
 		}
-		return string("");
+		return std::string("");
 	}
 
 	public:
@@ -94,7 +94,7 @@ private:
 		open = 0;
 
 		for (int i = 0; i < 10; i++)
-			exp = (exp.size() > 0 ? exp + OPER : string("")) + g_openp() + gexpr() + OPER + gexpr() + g_closep();
+			exp = (exp.size() > 0 ? exp + OPER : std::string("")) + g_openp() + gexpr() + OPER + gexpr() + g_closep();
 
 		if (open)
 			for (; open--;)

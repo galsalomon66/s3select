@@ -10,8 +10,6 @@
 #include <math.h>
 #include <boost/lexical_cast.hpp>
 
-using namespace std;
-
 namespace s3selectEngine {
 
 class base_s3select_exception
@@ -49,7 +47,7 @@ class s3select_allocator //s3select is the "owner"
 {
     private:
 
-    vector<char*> list_of_buff;
+    std::vector<char*> list_of_buff;
     u_int32_t m_idx;
 
     public:
@@ -128,13 +126,13 @@ private:
     std::vector<std::string_view> m_columns{128};
     int m_upper_bound;
 
-    vector<pair<std::string,int >> m_column_name_pos;
+    std::vector<std::pair<std::string,int >> m_column_name_pos;
 
 public:
 
     void set_column_pos(const char *n, int pos)//TODO use std::string
     {
-        m_column_name_pos.push_back( pair<const char*,int>(n,pos));
+        m_column_name_pos.push_back( std::pair<const char*,int>(n,pos));
     }
 
     void update(std::vector<std::string_view> & tokens,size_t num_of_tokens)
@@ -153,7 +151,7 @@ public:
     int get_column_pos(const char *n)
     {//done only upon building the AST , not on "runtime"
 
-        vector<pair<std::string,int >>::iterator iter;
+        std::vector<std::pair<std::string,int >>::iterator iter;
         
         for( auto iter : m_column_name_pos)
         {
@@ -183,10 +181,10 @@ class projection_alias {
 //those routines are *NOT* intensive, works once per query parse time.
 
     private:
-        std::vector< pair<std::string,base_statement *> > alias_map;
+        std::vector< std::pair<std::string,base_statement *> > alias_map;
 
     public:
-        std::vector< pair<std::string,base_statement *> > * get()
+        std::vector< std::pair<std::string,base_statement *> > * get()
         {
             return &alias_map;
         }
@@ -200,7 +198,7 @@ class projection_alias {
                     return false; //alias name already exist
 
             }
-            pair<std::string,base_statement *> new_alias(alias_name,bs);
+            std::pair<std::string,base_statement *> new_alias(alias_name,bs);
             alias_map.push_back(new_alias);
             
             return true;
@@ -939,7 +937,7 @@ protected:
 
 public:
     //TODO bool semantic() validate number of argument and type
-    virtual bool operator()(vector<base_statement *> *args, variable *result) = 0;
+    virtual bool operator()(std::vector<base_statement *> *args, variable *result) = 0;
     base_function() : aggregate(false) {}
     bool is_aggregate() { return aggregate == true; }
     virtual void get_aggregate_result(variable *) {}
@@ -953,9 +951,9 @@ struct _fn_add : public base_function{
 
     value var_result;
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
-        vector<base_statement*>::iterator iter = args->begin();
+        std::vector<base_statement*>::iterator iter = args->begin();
         base_statement* x =  *iter;
         iter++;
         base_statement* y = *iter;
@@ -975,9 +973,9 @@ struct _fn_sum : public base_function
 
     _fn_sum() : sum(0) { aggregate = true; }
 
-    bool operator()(vector<base_statement *> *args, variable *result)
+    bool operator()(std::vector<base_statement *> *args, variable *result)
     {
-        vector<base_statement *>::iterator iter = args->begin();
+        std::vector<base_statement *>::iterator iter = args->begin();
         base_statement *x = *iter;
 
         try
@@ -1003,7 +1001,7 @@ struct _fn_count : public base_function{
 
     _fn_count():count(0){aggregate=true;}
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
         count += 1;
 
@@ -1020,9 +1018,9 @@ struct _fn_min : public base_function{
 
     _fn_min():min(__INT64_MAX__){aggregate=true;}
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
-        vector<base_statement*>::iterator iter = args->begin();
+        std::vector<base_statement*>::iterator iter = args->begin();
         base_statement* x =  *iter;
 
         if(min > x->eval()) min=x->eval();
@@ -1040,9 +1038,9 @@ struct _fn_max : public base_function{
 
     _fn_max():max(-__INT64_MAX__){aggregate=true;}
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
-        vector<base_statement*>::iterator iter = args->begin();
+        std::vector<base_statement*>::iterator iter = args->begin();
         base_statement* x =  *iter;
 
         if(max < x->eval()) max=x->eval();
@@ -1059,7 +1057,7 @@ struct _fn_to_int : public base_function{
     value var_result;
     value func_arg;
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
         char *perr;
         int64_t i=0;
@@ -1085,7 +1083,7 @@ struct _fn_to_float : public base_function{
 
     value var_result;
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
         char *perr;
         double d=0;
@@ -1114,9 +1112,9 @@ struct _fn_substr : public base_function{
     //should validate result length.
     //TODO may replace by std::string (dynamic) , or to replace with global allocator , in query scope.
 
-    bool operator()(vector<base_statement*> * args,variable * result)
+    bool operator()(std::vector<base_statement*> * args,variable * result)
     {
-        vector<base_statement*>::iterator iter = args->begin();
+        std::vector<base_statement*>::iterator iter = args->begin();
         int args_size = args->size();
 
 
@@ -1197,14 +1195,14 @@ class s3select_functions : public __clt_allocator {
         void build_library()
         {
             // s3select function-name (string) --> function Enum
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("add",s3select_func_En_t::ADD) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("sum",s3select_func_En_t::SUM) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("count",s3select_func_En_t::COUNT) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("min",s3select_func_En_t::MIN) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("max",s3select_func_En_t::MAX) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("int",s3select_func_En_t::TO_INT) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("float",s3select_func_En_t::TO_FLOAT) );
-            m_functions_library.insert(pair<std::string,s3select_func_En_t>("substr",s3select_func_En_t::SUBSTR) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("add",s3select_func_En_t::ADD) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("sum",s3select_func_En_t::SUM) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("count",s3select_func_En_t::COUNT) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("min",s3select_func_En_t::MIN) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("max",s3select_func_En_t::MAX) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("int",s3select_func_En_t::TO_INT) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("float",s3select_func_En_t::TO_FLOAT) );
+            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("substr",s3select_func_En_t::SUBSTR) );
         }
 
     public:
@@ -1271,7 +1269,7 @@ class __function : public base_statement
 {
 
 private:
-    vector<base_statement *> arguments;
+    std::vector<base_statement *> arguments;
     std::string name;
     base_function *m_func_impl;
     s3select_functions *m_s3select_functions;
@@ -1332,7 +1330,7 @@ public:
     }
 
 
-    vector<base_statement *> get_arguments()
+    std::vector<base_statement *> get_arguments()
     {
         return arguments;
     }
@@ -1440,7 +1438,7 @@ bool base_statement::is_binop_aggregate_and_column(base_statement *skip_expressi
     {
 
         __function* f = (dynamic_cast<__function *>(this));
-        vector<base_statement*> l = f->get_arguments();
+        std::vector<base_statement*> l = f->get_arguments();
         for (auto i : l)
         {
             if (i!=skip_expression && i->is_column())
