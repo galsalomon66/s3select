@@ -490,9 +490,10 @@ class base_statement {
     bool m_is_cache_result;
     value m_alias_result;
     base_statement* m_projection_alias;
+    int m_eval_stack_depth;
 
 	public:
-        base_statement():m_scratch(0),is_last_call(false),m_is_cache_result(false),m_projection_alias(0){}
+        base_statement():m_scratch(0),is_last_call(false),m_is_cache_result(false),m_projection_alias(0),m_eval_stack_depth(0){}
         virtual value & eval() =0;
         virtual base_statement* left() {return 0;}
         virtual base_statement* right() {return 0;}       
@@ -543,9 +544,20 @@ class base_statement {
             m_is_cache_result = true;
         }
 
+        void dec_call_stack_depth()
+        {
+            m_eval_stack_depth --; 
+        }
+
         value & get_result_cache()
         {
             return m_alias_result;
+        }
+
+        int & get_eval_call_depth()
+        {
+            m_eval_stack_depth++;
+            return m_eval_stack_depth;
         }
 
         virtual ~base_statement(){}
@@ -686,13 +698,18 @@ public:
 
         if (m_projection_alias)
         {
+            if (m_projection_alias->get_eval_call_depth()>100)
+                throw base_s3select_exception("number of calls exceed maximum size, probably a cyclic reference to alias",base_s3select_exception::s3select_exp_en_t::FATAL);
+                
             if (m_projection_alias->is_result_cached() == false)
             {
                 var_value = m_projection_alias->eval();
                 m_projection_alias->set_result_cache(var_value);
             }
             else
-                var_value = m_projection_alias->get_result_cache();        
+                var_value = m_projection_alias->get_result_cache();
+
+            m_projection_alias->dec_call_stack_depth();     
         }
         else
             var_value = (char*)m_scratch->get_column_value(column_pos).data();//no allocation. returning pointer of allocated space 
