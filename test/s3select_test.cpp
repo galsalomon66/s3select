@@ -211,7 +211,7 @@ TEST(TestS3SElect, arithmetic_operator)
 	ASSERT_EQ( (value(0)-value(2)*value(4)).i64() , -8 );
 	ASSERT_EQ( (value(1.23)-value(0.1)*value(2)).dbl() , 1.03 );
 
-	a=1; //a+b modify a
+	a=int64_t(1); //a+b modify a
 	ASSERT_EQ( ( (a+b) * (c+d) ).i64() , 21 );
 }
 
