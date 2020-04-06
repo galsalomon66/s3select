@@ -7,6 +7,7 @@
 #include <string>
 #include <list>
 #include "s3select_oper.h"
+#include "s3select_functions.h"
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
 #include <functional>
