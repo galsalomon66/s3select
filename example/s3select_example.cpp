@@ -2,6 +2,7 @@
 #include <fstream>
 
 using namespace s3selectEngine;
+using namespace BOOST_SPIRIT_CLASSIC_NS;
 
 int cli_get_schema(const char *input_schema, actionQ &x)
 {

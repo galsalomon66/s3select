@@ -12,7 +12,7 @@
 #include <boost/bind.hpp>
 #include <functional>
 
-using namespace BOOST_SPIRIT_CLASSIC_NS;
+
 #define _DEBUG_TERM {string  token(a,b);std::cout << __FUNCTION__ << token << std::endl;}
 
 
@@ -111,7 +111,7 @@ struct push_float_number : public base_action //TODO use define for defintion of
          std::string token(a, b);
 
         //the parser for float(real_p) is accepting also integers, thus "blocking" integer acceptence and all are float.
-        parse_info<> info = parse(token.c_str(), int_p, space_p);
+        bsc::parse_info<> info = bsc::parse(token.c_str(), bsc::int_p, bsc::space_p);
 
         if (!info.full)
         {
@@ -450,7 +450,7 @@ struct push_debug_1 : public base_action
 };
 static push_debug_1 g_push_debug_1;
 
-struct s3select : public grammar<s3select>
+struct s3select : public bsc::grammar<s3select>
 {
     private:
 
@@ -511,7 +511,7 @@ struct s3select : public grammar<s3select>
 
             try
             {
-                parse_info<> info = boost::spirit::classic::parse(input_query, *this, space_p);
+                bsc::parse_info<> info = bsc::parse(input_query, *this, bsc::space_p);
                 auto query_parse_position = info.stop;
 
                 if (!info.full)
@@ -622,22 +622,22 @@ struct s3select : public grammar<s3select>
         definition(s3select const & )
         {///// s3select syntax rules and actions for building AST
 
-            select_expr = str_p("select")  >> projections >> str_p("from") >> (s3_object)[BOOST_BIND_ACTION(push_from_clause)] >> !where_clause >> ';';
+            select_expr = bsc::str_p("select")  >> projections >> bsc::str_p("from") >> (s3_object)[BOOST_BIND_ACTION(push_from_clause)] >> !where_clause >> ';';
             
             projections = projection_expression >> *( ',' >> projection_expression) ;
 
-            projection_expression = (arithmetic_expression >> str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] | (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)]  ;
+            projection_expression = (arithmetic_expression >> bsc::str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] | (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)]  ;
 
-            alias_name = lexeme_d[(+alpha_p >> *digit_p)] ;
+            alias_name = bsc::lexeme_d[(+bsc::alpha_p >> *bsc::digit_p)] ;
 
 
-            s3_object = str_p("stdin") | object_path ; 
+            s3_object = bsc::str_p("stdin") | object_path ; 
 
             object_path = "/" >> *( fs_type >> "/") >> fs_type;
 
-            fs_type = lexeme_d[+( alnum_p | str_p(".")  | str_p("_")) ];
+            fs_type = bsc::lexeme_d[+( bsc::alnum_p | bsc::str_p(".")  | bsc::str_p("_")) ];
 
-            where_clause = str_p("where") >> condition_expression;
+            where_clause = bsc::str_p("where") >> condition_expression;
 
             condition_expression = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
 
@@ -660,32 +660,32 @@ struct s3select : public grammar<s3select>
                                 (function)[BOOST_BIND_ACTION(push_debug_1)]  | (variable)[BOOST_BIND_ACTION(push_variable)] ;//function is pushed by right-term 
 
                        
-            number = int_p;
+            number = bsc::int_p;
 
-            float_number = real_p;
+            float_number = bsc::real_p;
 
-            string = str_p("\"") >> *( anychar_p - str_p("\"") ) >> str_p("\"") ;
+            string = bsc::str_p("\"") >> *( bsc::anychar_p - bsc::str_p("\"") ) >> bsc::str_p("\"") ;
 
-            column_pos = ('_'>>+(digit_p) ) | '*' ;
+            column_pos = ('_'>>+(bsc::digit_p) ) | '*' ;
 
-            muldiv_operator = str_p("*") | str_p("/") | str_p("^");// got precedense
+            muldiv_operator = bsc::str_p("*") | bsc::str_p("/") | bsc::str_p("^");// got precedense
 
-            addsubop_operator = str_p("+") | str_p("-");
+            addsubop_operator = bsc::str_p("+") | bsc::str_p("-");
 
 
-            arith_cmp = str_p(">=") | str_p("<=") | str_p("==") | str_p("<") | str_p(">") | str_p("!=");
+            arith_cmp = bsc::str_p(">=") | bsc::str_p("<=") | bsc::str_p("==") | bsc::str_p("<") | bsc::str_p(">") | bsc::str_p("!=");
 
-            log_op = str_p("and") | str_p("or"); //TODO add NOT (unary)
+            log_op = bsc::str_p("and") | bsc::str_p("or"); //TODO add NOT (unary)
 
-            variable =  lexeme_d[(+alpha_p >> *digit_p)];
+            variable =  bsc::lexeme_d[(+bsc::alpha_p >> *bsc::digit_p)];
         }
     
 
-        rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, arithmetic_predicate, factor;
-        rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
-        rule<ScannerT> fs_type,object_path;
-        rule<ScannerT> projections,projection_expression,alias_name,column_pos;
-        rule<ScannerT> const &start() const { return select_expr; }
+        bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, arithmetic_predicate, factor;
+        bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
+        bsc::rule<ScannerT> fs_type,object_path;
+        bsc::rule<ScannerT> projections,projection_expression,alias_name,column_pos;
+        bsc::rule<ScannerT> const &start() const { return select_expr; }
     };
 };
 

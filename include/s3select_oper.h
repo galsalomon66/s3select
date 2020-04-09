@@ -8,7 +8,11 @@
 #include <vector>
 #include <string.h>
 #include <math.h>
+
 #include <boost/lexical_cast.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/bind.hpp>
+namespace bsc = BOOST_SPIRIT_CLASSIC_NS;
 
 namespace s3selectEngine {
 
@@ -258,6 +262,7 @@ public:
         int64_t num;
         char *str;//TODO consider string_view
         double dbl;
+        boost::posix_time::ptime *timestamp;
     } value_t;
 
 private:
@@ -271,14 +276,16 @@ public:
         DECIMAL,
         FLOAT,
         STRING,
+        TIMESTAMP,
         NA
     } ;
-    value_En_t type; // TODO private
+    value_En_t type;
 
     value(int64_t n) : type(value_En_t::DECIMAL) { __val.num = n; }
     value(int n) : type(value_En_t::DECIMAL) { __val.num = n; }
     value(bool b) : type(value_En_t::DECIMAL) { __val.num = (int64_t)b; }
     value(double d) : type(value_En_t::FLOAT) { __val.dbl = d; }
+    value(boost::posix_time::ptime *timestamp) : type(value_En_t::TIMESTAMP) { __val.timestamp = timestamp; }
 
     value(const char *s) : type(value_En_t::STRING) 
     { 
@@ -290,12 +297,14 @@ public:
 
     bool is_number() const
     {
-        if ((type != value_En_t::STRING))
+        if ((type == value_En_t::DECIMAL || type == value_En_t::FLOAT))
             return true;
-        else
-            return false;
+
+        return false;
     }
+
     bool is_string() const { return type == value_En_t::STRING; }
+    bool is_timestamp() const { return type == value_En_t::TIMESTAMP; }
 
 
     std::string & to_string(){//TODO very intensive , must improve this
@@ -304,9 +313,10 @@ public:
                 if (type == value_En_t::DECIMAL){
 			            //m_to_string = std::to_string(__val.num); 
 			            m_to_string.assign( boost::lexical_cast<std::string>(__val.num) );
-                }else {
+                }else if(type == value_En_t::FLOAT){
                         m_to_string = std::to_string(__val.dbl);
-			
+                }else {
+                        m_to_string =  to_simple_string( *__val.timestamp );
                 }
         }else{
             m_to_string.assign( __val.str );
@@ -366,6 +376,14 @@ public:
 	return *this;
     }
 
+    value & operator=(boost::posix_time::ptime *p)
+    {
+        this->__val.timestamp = p;
+        this->type = value_En_t::TIMESTAMP;
+
+	return *this;
+    }
+
     int64_t i64()
     {
         return __val.num;
@@ -379,6 +397,11 @@ public:
     double dbl()
     {
         return __val.dbl;
+    }
+
+    boost::posix_time::ptime * timestamp() const
+    {
+        return __val.timestamp;
     }
 
     bool operator<(const value &v)//basic compare operator , most itensive runtime operation 
@@ -407,6 +430,9 @@ public:
                 
             }
         }
+
+        if(is_timestamp() && v.is_timestamp())
+            return *timestamp() < *(v.timestamp());
 
         throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
     }
@@ -438,6 +464,9 @@ public:
             }
         }
 
+        if(is_timestamp() && v.is_timestamp())
+            return *timestamp() > *(v.timestamp());
+
         throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
     }
 
@@ -468,6 +497,9 @@ public:
                 
             }
         }
+
+        if(is_timestamp() && v.is_timestamp())
+            return *timestamp() == *(v.timestamp());
 
         throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
     }
@@ -705,6 +737,11 @@ public:
     void set_value(int64_t i)
     {
         var_value = i;
+    }
+
+    void set_value(boost::posix_time::ptime *p)
+    {
+        var_value = p;
     }
 
     virtual ~variable(){}
@@ -1019,6 +1056,23 @@ class addsub_operation : public base_statement  {
 	
 		    return var_value;
         }
+};
+
+class base_function 
+{
+
+protected:
+    bool aggregate;
+
+public:
+    //TODO add semantic to base-function , it operate once on function creation
+    // validate semantic on creation instead on run-time     
+    virtual bool operator()(std::vector<base_statement *> *args, variable *result) = 0;
+    base_function() : aggregate(false) {}
+    bool is_aggregate() { return aggregate == true; }
+    virtual void get_aggregate_result(variable *) {}
+
+    virtual ~base_function(){}
 };
 
 
