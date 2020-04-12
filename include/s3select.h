@@ -745,7 +745,7 @@ private:
             if (*t == 10)
                 break; //trimming newline
         }
-        m_row_tokens[i] = 0; //last token
+        m_row_tokens[i] = "\0"; //last token
 
         m_stream = p + (*p == '\n');
 
