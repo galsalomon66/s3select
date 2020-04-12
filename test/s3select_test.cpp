@@ -1,6 +1,8 @@
 #include "s3select.h"
 #include "gtest/gtest.h"
 #include <string>
+#include "boost/date_time/gregorian/gregorian.hpp"
+#include "boost/date_time/posix_time/posix_time.hpp"
 
 using namespace s3selectEngine;
 
@@ -213,5 +215,26 @@ TEST(TestS3SElect, arithmetic_operator)
 
 	a=int64_t(1); //a+b modify a
 	ASSERT_EQ( ( (a+b) * (c+d) ).i64() , 21 );
+}
+
+TEST(TestS3SElect, timestamp_function)
+{
+    // TODO: support formats listed here:
+    // https://docs.aws.amazon.com/AmazonS3/latest/dev/s3-glacier-select-sql-reference-date.html#s3-glacier-select-sql-reference-to-timestamp
+    const std::string timestamp = "2007-02-23:14:33:01";
+    // TODO: out_simestamp should be the same as timestamp
+    const std::string out_timestamp = "2007-Feb-23 14:33:01";
+    const std::string input_query = "select timestamp(\"" + timestamp + "\") from stdin;" ;
+	std::string s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, out_timestamp);
+}
+
+TEST(TestS3SElect, utcnow_function)
+{
+    const boost::posix_time::ptime now(boost::posix_time::second_clock::universal_time());
+    const std::string input_query = "select utcnow() from stdin;" ;
+	auto s3select_res = run_s3select(input_query);
+    const boost::posix_time::ptime res_now;
+    ASSERT_EQ(s3select_res, boost::posix_time::to_simple_string(now));
 }
 

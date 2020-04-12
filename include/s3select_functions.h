@@ -26,39 +26,30 @@ struct push_4dig
 };
 static push_4dig g_push_4dig;
 
-enum class s3select_func_En_t {ADD,SUM,MIN,MAX,COUNT,TO_INT,TO_FLOAT,TO_TIMESTAMP,SUBSTR,EXTRACT,DATE_ADD,DATE_DIFF};
-
-
+enum class s3select_func_En_t {ADD,SUM,MIN,MAX,COUNT,TO_INT,TO_FLOAT,TO_TIMESTAMP,SUBSTR,EXTRACT,DATE_ADD,DATE_DIFF,UTCNOW};
 
 class s3select_functions : public __clt_allocator {
 
     private:
-        
-        std::map<std::string,s3select_func_En_t> m_functions_library;
-
-        void build_library()
-        {
-            // s3select function-name (string) --> function Enum
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("add",s3select_func_En_t::ADD) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("sum",s3select_func_En_t::SUM) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("count",s3select_func_En_t::COUNT) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("min",s3select_func_En_t::MIN) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("max",s3select_func_En_t::MAX) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("int",s3select_func_En_t::TO_INT) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("float",s3select_func_En_t::TO_FLOAT) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("substr",s3select_func_En_t::SUBSTR) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("timestamp",s3select_func_En_t::TO_TIMESTAMP) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("extract",s3select_func_En_t::EXTRACT) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("dateadd",s3select_func_En_t::DATE_ADD) );
-            m_functions_library.insert(std::pair<std::string,s3select_func_En_t>("datediff",s3select_func_En_t::DATE_DIFF) );
-        }
+       
+        using FunctionLibrary = std::map<std::string,s3select_func_En_t>;
+        const FunctionLibrary m_functions_library = {
+            {"add", s3select_func_En_t::ADD},
+            {"sum", s3select_func_En_t::SUM},
+            {"count", s3select_func_En_t::COUNT},
+            {"min", s3select_func_En_t::MIN},
+            {"max", s3select_func_En_t::MAX},
+            {"int", s3select_func_En_t::TO_INT},
+            {"float", s3select_func_En_t::TO_FLOAT},
+            {"substr", s3select_func_En_t::SUBSTR},
+            {"timestamp", s3select_func_En_t::TO_TIMESTAMP},
+            {"extract", s3select_func_En_t::EXTRACT},
+            {"dateadd", s3select_func_En_t::DATE_ADD},
+            {"datediff", s3select_func_En_t::DATE_DIFF},
+            {"utcnow", s3select_func_En_t::UTCNOW}
+        };
 
     public:
-
-        s3select_functions()
-        {
-            build_library();
-        }
 
     base_function * create(std::string fn_name);
 };
@@ -550,6 +541,25 @@ struct _fn_add_to_timestamp : public base_function {
 
 };
 
+struct _fn_utcnow : public base_function {
+
+    boost::posix_time::ptime now_ptime;
+
+    bool operator()(std::vector<base_statement *> *args, variable *result)
+    {
+        int args_size = args->size();
+
+        if (args_size != 0) {
+            throw base_s3select_exception("utcnow does not expect any parameters");
+        }
+
+        now_ptime = std::move(boost::posix_time::second_clock::universal_time());
+        result->set_value( &now_ptime );
+            
+        return true;
+    }
+};
+
 struct _fn_substr : public base_function{
 
     char buff[4096];// this buffer is persist for the query life time, it use for the results per row(only for the specific function call)
@@ -635,7 +645,7 @@ struct _fn_substr : public base_function{
 
 base_function *s3select_functions::create(std::string fn_name)
 {
-    std::map<std::string, s3select_func_En_t>::iterator iter = m_functions_library.find(fn_name);
+    const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
 
     if (iter == m_functions_library.end())
     {
@@ -692,6 +702,10 @@ base_function *s3select_functions::create(std::string fn_name)
 
     case s3select_func_En_t::DATE_DIFF:
         return S3SELECT_NEW(_fn_diff_timestamp);
+        break;
+    
+    case s3select_func_En_t::UTCNOW:
+        return S3SELECT_NEW(_fn_utcnow);
         break;
 
     default:
