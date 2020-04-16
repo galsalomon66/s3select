@@ -118,7 +118,7 @@ std::string run_s3select(std::string expression)
 
 	s3_csv_object.run_s3select_on_object(s3select_result,in.c_str(),in.size(),false,false,true);
 
-	s3select_result[ s3select_result.find_first_of(",") ] = 0;
+	s3select_result = s3select_result.substr(0,s3select_result.find_first_of(","));
 
 	return s3select_result;
 }
