@@ -651,9 +651,8 @@ struct s3select : public bsc::grammar<s3select>
 
             mulldiv_operand = arithmetic_argument | ('(' >> (arithmetic_expression) >> ')') ; 
 
-            list_of_function_arguments = (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)] >> *(',' >> (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)]) ;
-
-            function =( (variable >>  '(' )[BOOST_BIND_ACTION(push_function_name)]   >> list_of_function_arguments >> ')' ) [BOOST_BIND_ACTION(push_function_expr)];
+            list_of_function_arguments = (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)] >> *(',' >> (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)]);
+            function = ((variable >> '(' )[BOOST_BIND_ACTION(push_function_name)] >> !list_of_function_arguments >> ')')[BOOST_BIND_ACTION(push_function_expr)];
             
             arithmetic_argument = (float_number)[BOOST_BIND_ACTION(push_float_number)] |  (number)[BOOST_BIND_ACTION(push_number)] | (column_pos)[BOOST_BIND_ACTION(push_column_pos)] | 
                                 (string)[BOOST_BIND_ACTION(push_string)] |
