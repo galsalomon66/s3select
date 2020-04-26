@@ -83,15 +83,25 @@ int main(int argc,char **argv)
     } 
 
     std::string s3select_result;
+    s3selectEngine::csv_object::csv_defintions csv;
+    //csv.column_delimiter='|';
+    //csv.row_delimiter='\t';
+    
+
+    //s3selectEngine::csv_object  s3_csv_object(&s3select_syntax,csv);
     s3selectEngine::csv_object  s3_csv_object(&s3select_syntax);
 
+	#define BUFF_SIZE 1024*1024*10
     while(1)
     {
         char buff[4096];
+        //char * buff = (char*)malloc( BUFF_SIZE );
+
         char * in = fgets(buff,sizeof(buff),fp);
+	//size_t input_sz = fread(buff, BUFF_SIZE , 1, fp);char *in=buff; input_sz = strlen(buff);
         size_t input_sz = in == 0 ? 0 : strlen(in);
 
-        if (!in) to_aggregate = true;
+        if (!input_sz) to_aggregate = true;
 
         
         int status = s3_csv_object.run_s3select_on_object(s3select_result,in,input_sz,false,false,to_aggregate);
@@ -104,7 +114,7 @@ int main(int argc,char **argv)
         if(s3select_result.size()>1) std::cout << s3select_result;
 
         s3select_result = "";
-        if(!in) break;
+        if(!input_sz) break;
 
     }
 

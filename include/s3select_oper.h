@@ -139,7 +139,7 @@ public:
         m_column_name_pos.push_back( std::pair<const char*,int>(n,pos));
     }
 
-    void update(std::vector<std::string_view> & tokens,size_t num_of_tokens)
+    void update(std::vector<char*> tokens,size_t num_of_tokens)
     {
         size_t i=0;
         for(auto s : tokens)

@@ -8,6 +8,7 @@
 #include <list>
 #include "s3select_oper.h"
 #include "s3select_functions.h"
+#include "s3select_csv_parser.h"
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
 #include <functional>
@@ -712,6 +713,35 @@ public:
 class csv_object : public base_s3object
 {
 
+public:
+    struct csv_defintions{
+        char row_delimiter;
+        char column_delimiter;
+        char escape_char;
+        char quot_char;
+
+        csv_defintions():row_delimiter('\n'),column_delimiter(','),escape_char('\\'),quot_char('"'){}
+
+    } m_csv_defintion;
+
+    csv_object(s3select *s3_query) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
+    {
+        set(s3_query);
+        csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
+    }
+
+    csv_object(s3select *s3_query, struct csv_defintions csv) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
+    {
+        set(s3_query);
+        m_csv_defintion = csv;
+        csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
+    }
+
+    csv_object(): base_s3object(0),m_s3_select(0)
+    {
+        csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
+    }
+
 private:
     base_statement *m_where_clause;
     std::vector<base_statement *> m_projections;
@@ -722,37 +752,28 @@ private:
     std::string m_error_description;
     char *m_stream;
     char *m_end_stream;
-    std::vector<std::string_view> m_row_tokens{128};
+    std::vector<char*> m_row_tokens{128};
     s3select * m_s3_select;
+    csvParser csv_parser;
 
-    int getNextRow() //TODO add delimiter
-    {                //purpose: simple csv parser, not handling escape rules
+    int getNextRow()
+    {
+        size_t num_of_tokens=0;
 
-        char *p = m_stream;
-        int i = 0;
-        if (p >= m_end_stream)
-            return -1; //end-of-stream
-
-        while (p < m_end_stream && *p != '\n')
-        {
-            char *t = p;
-            while (p < m_end_stream && (*(p) != ',') && *p != '\n') //TODO delimiter
-                p++;
-            *p = 0;
-            m_row_tokens[i++] = t;
-            p++;
-            if (*t == 10)
-                break; //trimming newline
-        }
-        m_row_tokens[i] = "\0"; //last token
-
-        m_stream = p + (*p == '\n');
-
-        if (m_skip_last_line && p >= m_end_stream)
+        if(m_stream>=m_end_stream)
             return -1;
 
-        return i;
-  }
+        if(csv_parser.parse(m_stream,m_end_stream,&m_row_tokens,&num_of_tokens)<0)
+            throw base_s3select_exception("failed to parse csv stream",base_s3select_exception::s3select_exp_en_t::FATAL);
+       
+        m_stream = (char*)csv_parser.currentLoc();
+
+        if (m_skip_last_line && m_stream >= m_end_stream)
+            return -1;
+
+        return num_of_tokens;
+
+    }
 
 public:
 
@@ -773,13 +794,6 @@ public:
         m_aggr_flow = m_s3_select->is_aggregate_query();
     }
 
-  csv_object(s3select *s3_query) :  base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
-  { 
-      set(s3_query);
-  }
-
-  csv_object(): base_s3object(0),m_s3_select(0){}
-  
 
 std::string get_error_description(){return m_error_description;}
 
@@ -868,7 +882,7 @@ public:
 
     if(skip_first_line)
     {
-        while(*m_stream && (*m_stream != '\n')) m_stream++;
+        while(*m_stream && (*m_stream != m_csv_defintion.row_delimiter )) m_stream++;
         m_stream++;//TODO nicer
     }
 
