@@ -41,7 +41,7 @@ namespace s3selectEngine
 
 		void set(const char * input, std::vector<char*> *tk)
 		{
-			input_cur_location = input_stream = (char*)input;
+			input_cur_location = input_stream = const_cast<char*>(input);
 			token_idx = 0;
 			tokens = tk;
 			escape_idx = 0;
@@ -296,10 +296,13 @@ namespace s3selectEngine
 			{
 				p.process_event(event_quote());
 			}
-			else
-				p.process_event(event_not_column_sep());
+			else if (p.get_char() == m_escape_char)
+			{
+				p.process_event(event_escape());
+			}
+			else p.process_event(event_not_column_sep());
 
-			if (p.tokens->capacity() < p.token_idx)
+			if (p.tokens->capacity() <= p.token_idx)
 				return -1;
 
 			if (p.currentLoc() >= end_stream)
