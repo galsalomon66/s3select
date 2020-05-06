@@ -724,20 +724,20 @@ public:
 
     } m_csv_defintion;
 
-    csv_object(s3select *s3_query) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
+    csv_object(s3select *s3_query) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0)
     {
         set(s3_query);
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
 
-    csv_object(s3select *s3_query, struct csv_defintions csv) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query)
+    csv_object(s3select *s3_query, struct csv_defintions csv) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0)
     {
         set(s3_query);
         m_csv_defintion = csv;
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
 
-    csv_object(): base_s3object(0),m_s3_select(0)
+    csv_object(): base_s3object(0),m_s3_select(0),m_error_count(0)
     {
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
@@ -755,6 +755,7 @@ private:
     std::vector<char*> m_row_tokens{128};
     s3select * m_s3_select;
     csvParser csv_parser;
+    size_t m_error_count;
 
     int getNextRow()
     {
@@ -898,7 +899,8 @@ public:
           {
               std::cout << e.what() << std::endl;
               m_error_description = e.what();
-              if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL)//abort query execution
+              m_error_count ++;
+              if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100)//abort query execution
                   return -1;
           }
 

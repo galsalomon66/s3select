@@ -336,7 +336,7 @@ struct _fn_to_timestamp : public base_function
         std::vector<base_statement *>::iterator iter = args->begin();
         int args_size = args->size();
 
-        if (args_size < 1)
+        if (args_size != 1)
             throw base_s3select_exception("to_timestamp should have one parameter");
 
         base_statement *str = *iter;
@@ -543,7 +543,7 @@ struct _fn_add_to_timestamp : public base_function {
 
 struct _fn_utcnow : public base_function {
 
-    boost::posix_time::ptime now_ptime;
+	boost::posix_time::ptime now_ptime;
 
     bool operator()(std::vector<base_statement *> *args, variable *result)
     {
@@ -553,7 +553,7 @@ struct _fn_utcnow : public base_function {
             throw base_s3select_exception("utcnow does not expect any parameters");
         }
 
-        now_ptime = std::move(boost::posix_time::second_clock::universal_time());
+	now_ptime = boost::posix_time::ptime( boost::posix_time::second_clock::universal_time()); 
         result->set_value( &now_ptime );
             
         return true;
