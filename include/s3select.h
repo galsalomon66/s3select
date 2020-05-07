@@ -719,25 +719,27 @@ public:
         char column_delimiter;
         char escape_char;
         char quot_char;
+        bool use_header_info;
+        bool ignore_header_info;//skip first line
 
-        csv_defintions():row_delimiter('\n'),column_delimiter(','),escape_char('\\'),quot_char('"'){}
+        csv_defintions():row_delimiter('\n'),column_delimiter(','),escape_char('\\'),quot_char('"'),use_header_info(false),ignore_header_info(false){}
 
     } m_csv_defintion;
 
-    csv_object(s3select *s3_query) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0)
+    csv_object(s3select *s3_query) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0),m_extract_csv_header_info(false)
     {
         set(s3_query);
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
 
-    csv_object(s3select *s3_query, struct csv_defintions csv) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0)
+    csv_object(s3select *s3_query, struct csv_defintions csv) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0),m_extract_csv_header_info(false)
     {
         set(s3_query);
         m_csv_defintion = csv;
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
 
-    csv_object(): base_s3object(0),m_s3_select(0),m_error_count(0)
+    csv_object(): base_s3object(0),m_s3_select(0),m_error_count(0),m_extract_csv_header_info(false)
     {
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
@@ -756,6 +758,8 @@ private:
     s3select * m_s3_select;
     csvParser csv_parser;
     size_t m_error_count;
+    bool m_extract_csv_header_info;
+    std::vector<std::string> m_csv_schema{128};
 
     int getNextRow()
     {
@@ -870,6 +874,30 @@ public:
     return number_of_tokens; //TODO wrong
   }
 
+  int extract_csv_header_info()
+  {
+
+    if (m_csv_defintion.ignore_header_info == true)
+    {
+        while(*m_stream && (*m_stream != m_csv_defintion.row_delimiter )) m_stream++;
+        m_stream++;
+    }
+    else
+    if(m_csv_defintion.use_header_info == true)
+    {
+        size_t num_of_tokens = getNextRow();//TODO validate number of tokens
+        
+        for(size_t i=0;i<num_of_tokens;i++)
+           m_csv_schema[i].assign(m_row_tokens[i]);
+
+        m_s3_select->load_schema(m_csv_schema);           
+    }
+
+    m_extract_csv_header_info = true;
+
+    return 0;
+  }
+
   int run_s3select_on_object(std::string &result,const char *csv_stream,size_t stream_length,bool skip_first_line,bool skip_last_line,bool do_aggregate)
   {
 
@@ -880,6 +908,9 @@ public:
     m_skip_last_line = skip_last_line;
 
     m_stream_length = stream_length;
+
+    if(m_extract_csv_header_info == false) 
+        extract_csv_header_info();
 
     if(skip_first_line)
     {

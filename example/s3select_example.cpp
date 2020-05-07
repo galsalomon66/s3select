@@ -28,22 +28,15 @@ int main(int argc,char **argv)
     //purpose: demostrate the s3select functionalities
     s3select s3select_syntax;
 
-    char *input_schema = 0, *input_query = 0;
+    char  *input_query = 0;
 
     for (int i = 0; i < argc; i++)
     {
-        if (!strcmp(argv[i], "-s"))
-            input_schema = argv[i + 1];
+
         if (!strcmp(argv[i], "-q"))
             input_query = argv[i + 1];
     }
 
-    actionQ scm;
-    if (input_schema && cli_get_schema(input_schema, scm) < 0)
-    {
-        std::cout << "input schema is wrong" << std::endl;
-        return -1;
-    }
 
     if (!input_query)
     {
@@ -51,7 +44,6 @@ int main(int argc,char **argv)
         return -1;
     }
 
-    s3select_syntax.load_schema(scm.schema_columns);
 
     bool to_aggregate = false;
 
@@ -84,12 +76,13 @@ int main(int argc,char **argv)
 
     std::string s3select_result;
     s3selectEngine::csv_object::csv_defintions csv;
+    csv.use_header_info = true;
     //csv.column_delimiter='|';
     //csv.row_delimiter='\t';
     
 
-    //s3selectEngine::csv_object  s3_csv_object(&s3select_syntax,csv);
-    s3selectEngine::csv_object  s3_csv_object(&s3select_syntax);
+    s3selectEngine::csv_object  s3_csv_object(&s3select_syntax,csv);
+    //s3selectEngine::csv_object  s3_csv_object(&s3select_syntax);
 
 	#define BUFF_SIZE 1024*1024*10
     while(1)

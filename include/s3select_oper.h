@@ -794,6 +794,10 @@ public:
         { //done once , for the first time
             column_pos = m_scratch->get_column_pos(_name.c_str());
 
+            if(column_pos>=0 && m_aliases->search_alias(_name.c_str()))
+                throw base_s3select_exception(std::string("multiple definition of column {") + _name + "} as schema-column and alias",base_s3select_exception::s3select_exp_en_t::FATAL);
+
+
             if (column_pos == undefined_column_pos)
             {//not belong to schema , should exist in aliases 
                 m_projection_alias = m_aliases->search_alias(_name.c_str());
@@ -802,7 +806,7 @@ public:
                 column_pos = column_alias;
                 if(m_projection_alias == 0)
                 {
-                    throw base_s3select_exception(std::string("alias ")+_name+std::string(" or column not exist in schema"),base_s3select_exception::s3select_exp_en_t::FATAL);
+                    throw base_s3select_exception(std::string("alias {")+_name+std::string("} or column not exist in schema"),base_s3select_exception::s3select_exp_en_t::FATAL);
                 }               
             }
             
@@ -810,7 +814,7 @@ public:
 
         if (m_projection_alias)
         {
-            if (m_projection_alias->get_eval_call_depth()>100)
+            if (m_projection_alias->get_eval_call_depth()>2)
                 throw base_s3select_exception("number of calls exceed maximum size, probably a cyclic reference to alias",base_s3select_exception::s3select_exp_en_t::FATAL);
                 
             if (m_projection_alias->is_result_cached() == false)
