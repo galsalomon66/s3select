@@ -726,20 +726,44 @@ public:
 
     } m_csv_defintion;
 
-    csv_object(s3select *s3_query) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0),m_extract_csv_header_info(false)
+    csv_object(s3select *s3_query) : 
+    base_s3object(s3_query->get_scratch_area()), 
+    m_skip_last_line(false),
+    m_s3_select(0),
+    m_error_count(0),
+    m_extract_csv_header_info(false),
+    m_previous_line(false),
+    m_skip_first_line(false),
+    m_processed_bytes(0)      
     {
         set(s3_query);
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
 
-    csv_object(s3select *s3_query, struct csv_defintions csv) : base_s3object(s3_query->get_scratch_area()), m_s3_select(s3_query),m_error_count(0),m_extract_csv_header_info(false)
+    csv_object(s3select *s3_query, struct csv_defintions csv) : 
+    base_s3object(s3_query->get_scratch_area()), 
+    m_skip_last_line(false),
+    m_s3_select(0),
+    m_error_count(0),
+    m_extract_csv_header_info(false),
+    m_previous_line(false),
+    m_skip_first_line(false),
+    m_processed_bytes(0)     
     {
         set(s3_query);
         m_csv_defintion = csv;
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
 
-    csv_object(): base_s3object(0),m_s3_select(0),m_error_count(0),m_extract_csv_header_info(false)
+    csv_object(): 
+    base_s3object(0),
+    m_skip_last_line(false),
+    m_s3_select(0),
+    m_error_count(0),
+    m_extract_csv_header_info(false),
+    m_previous_line(false),
+    m_skip_first_line(false),
+    m_processed_bytes(0)   
     {
         csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
     }
@@ -760,6 +784,13 @@ private:
     size_t m_error_count;
     bool m_extract_csv_header_info;
     std::vector<std::string> m_csv_schema{128};
+
+    //handling arbitrary chunks (rows cut in the middle)
+    bool m_previous_line;
+    bool m_skip_first_line;
+    std::string merge_line;
+    std::string m_last_line;
+    size_t m_processed_bytes;
 
     int getNextRow()
     {
@@ -896,6 +927,49 @@ public:
     m_extract_csv_header_info = true;
 
     return 0;
+  }
+
+  int run_s3select_on_stream(std::string &result, const char *csv_stream, size_t stream_length, size_t obj_size)
+  {
+      //purpose: the cv data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
+      //for later, upon next chunk of data is streaming, the stored-line is merge with current broken-line, and processed.
+      int status;
+      std::string tmp_buff;
+      u_int32_t skip_last_bytes = 0;
+      m_processed_bytes += stream_length;
+
+      m_skip_first_line = false;
+
+      if (m_previous_line)
+      { //if previous broken line exist , merge it to current chunk
+          char *p_obj_chunk = (char *)csv_stream;
+          while (*p_obj_chunk != m_csv_defintion.row_delimiter && p_obj_chunk<(csv_stream+stream_length))
+              p_obj_chunk++;
+
+          tmp_buff.assign((char *)csv_stream, (char *)csv_stream + (p_obj_chunk - csv_stream));
+          merge_line = m_last_line + tmp_buff + m_csv_defintion.row_delimiter;
+          m_previous_line = false;
+          m_skip_first_line = true;
+
+          status = run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
+      }
+
+      if (csv_stream[stream_length - 1] != m_csv_defintion.row_delimiter)
+      { //in case of "broken" last line
+          char *p_obj_chunk = (char *)&(csv_stream[stream_length - 1]);
+          while (*p_obj_chunk != m_csv_defintion.row_delimiter && p_obj_chunk>csv_stream)
+              p_obj_chunk--; //scan until end-of previous line in chunk
+
+          skip_last_bytes = (&(csv_stream[stream_length - 1]) - p_obj_chunk);
+          m_last_line.assign(p_obj_chunk + 1, p_obj_chunk + 1 + skip_last_bytes); //save it for next chunk
+
+          m_previous_line = true;//it means to skip last line
+
+      }
+
+      status = run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
+
+      return status;
   }
 
   int run_s3select_on_object(std::string &result,const char *csv_stream,size_t stream_length,bool skip_first_line,bool skip_last_line,bool do_aggregate)
