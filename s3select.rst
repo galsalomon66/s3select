@@ -1,8 +1,25 @@
-============================
- Ceph s3 select Feature List
-============================
+===============
+ Ceph s3 select 
+===============
+
+.. contents::
+
+Overview
+--------
+
+The purpose of s3select engine is to create an efficient pipe between user client to storage node (the engine should be close as possible to storage).
+It enables the user to define the exact portion of data should be received by his side.
+It also enables for higher level analytic-applications (such as SPARK-SQL) , using that feature to improve their latency and throughput.
+For example, a s3-object of several GB (CSV file), a user needs to extract a single column which filters by another column.
+such as:
+select customer-id where age>30 and age<65
+currently the whole s3-object must retrieve from OSD via RGW before filtering and extracting data.
+by "pushing down" the query into OSD , it's possible to save a lot of network and CPU(serial / de-serial).
+The bigger the object, and the more accurate the query, the better the performance.
+
 Features Support
 ----------------
+
 
 The following table describes the support for s3-select functionalities:
 
@@ -95,4 +112,3 @@ CSV parsing behavior
 |     csv header info             | FileHeaderInfo  | for "USE" value, each token on first line is column-name              |
 |                                 | tag             | "IGNORE" value, means to skip the first line                          |
 +---------------------------------+-----------------+-----------------------------------------------------------------------+
-
