@@ -118,6 +118,50 @@ Error Handling
     | Fatal severity (attached to the exception) will end execution immediately, other error severity are counted, upon reaching 100, it ends execution with an error message.
 
 
+AST denostration
+~~~~~~~~~~~~~~~~
+.. ditaa::
+
+                                          +---------------------+ 
+                                          |   select            | 
+                                  +------ +---------------------+---------+
+                                  |                    |                  |
+                                  |                    |                  |      
+                                  |                    |                  |
+                                  |                    V                  |
+                                  |        +--------------------+         |
+                                  |        |      s3object      |         | 
+                                  |        +--------------------+         |
+                                  |                                       |
+                                  V                                       V
+                    +---------------------+                        +-------------+
+                    |  projections        |                        |  where      |
+                    +---------------------+                        +-------------+
+                      |                  |                                |                        
+                      |                  |                                |
+                      |                  |                                |
+                      |                  |                                |
+                      |                  |                                |
+                      |                  |                                |
+                      V                  V                                V
+               +-----------+      +-----------+                    +-------------+ 
+               |  multiply |      |    date   |                    |    and      |
+               +-----------+      +-----------+                    +-------------+
+                |         |                                          |         |  
+                |         |                                          |         |
+                |         |                                          |         |
+                |         |                                          |         |
+                V         V                                          V         V
+         +-------+    +-------+                                   +-----+   +-----+
+         |payment|    | 0.3   |                                   | EQ  |   | LT  |
+         +-------+    +-------+                                +--+-----+   +-----+--+
+                                                               |        |   |        |
+                                                               |        |   |        |
+                                                               V        V   V        V
+                                                          +-------+ +----+ +-----+ +-----+
+                                                          | region| |east| |age  | | 30  |
+                                                          +-------+ +----+ +-----+ +-----+
+
 Features Support
 ----------------
 
