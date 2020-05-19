@@ -315,7 +315,7 @@ public:
 			            m_to_string.assign( boost::lexical_cast<std::string>(__val.num) );
                 }else if(type == value_En_t::FLOAT){
                         m_to_string = std::to_string(__val.dbl);
-                }else {
+                }else if (type == value_En_t::TIMESTAMP) {
                         m_to_string =  to_simple_string( *__val.timestamp );
                 }
         }else{
