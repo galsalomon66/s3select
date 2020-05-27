@@ -29,9 +29,10 @@ std::string run_expression_in_C_prog(const char * expression)
 		prog_c = (char*)malloc(C_FILE_SIZE);
 
 		size_t sz=sprintf(prog_c,"#include <stdio.h>\n \
+				#include <float.h>\n \
 				int main() \
 				{\
-				printf(\"%%f\\n\",(double)(%s));\
+				printf(\"%%.*e\\n\",DECIMAL_DIG,(double)(%s));\
 				} ", expression);
 
 		int status = fwrite(prog_c,1,sz,fp_c_file);
@@ -242,7 +243,7 @@ TEST(TestS3selectFunctions, add)
 {
     const std::string input_query = "select add(-5, 0.5) from stdin;" ;
 	  auto s3select_res = run_s3select(input_query);
-    ASSERT_EQ(s3select_res, std::string("-4.500000"));
+    ASSERT_EQ(s3select_res, std::string("-4.5"));
 }
 
 void generate_csv(std::string& out, size_t size) {
@@ -271,7 +272,7 @@ TEST(TestS3selectFunctions, sum)
         true   // aggregate call
         ); 
     ASSERT_EQ(status, 0);
-    ASSERT_EQ(s3select_result, std::string("8128,812.800000,"));
+    ASSERT_EQ(s3select_result, std::string("8128,812.80000000000007,"));
 }
 
 TEST(TestS3selectFunctions, count)
@@ -311,7 +312,7 @@ TEST(TestS3selectFunctions, min)
         true   // aggregate call
         ); 
     ASSERT_EQ(status, 0);
-    ASSERT_EQ(s3select_result, std::string("0,0.000000,"));
+    ASSERT_EQ(s3select_result, std::string("0,0,"));
 }
 
 TEST(TestS3selectFunctions, max)
@@ -331,42 +332,42 @@ TEST(TestS3selectFunctions, max)
         true   // aggregate call
         ); 
     ASSERT_EQ(status, 0);
-    ASSERT_EQ(s3select_result, std::string("127,12.700000,"));
+    ASSERT_EQ(s3select_result, std::string("127,12.699999999999999,"));
 }
 
 TEST(TestS3selectOperator, add)
 {
     const std::string input_query = "select -5 + 0.5 + -0.25 from stdin;" ;
 	  auto s3select_res = run_s3select(input_query);
-    ASSERT_EQ(s3select_res, std::string("-4.750000"));
+    ASSERT_EQ(s3select_res, std::string("-4.75"));
 }
 
 TEST(TestS3selectOperator, sub)
 {
     const std::string input_query = "select -5 - 0.5 - -0.25 from stdin;" ;
 	  auto s3select_res = run_s3select(input_query);
-    ASSERT_EQ(s3select_res, std::string("-5.250000"));
+    ASSERT_EQ(s3select_res, std::string("-5.25"));
 }
 
 TEST(TestS3selectOperator, mul)
 {
     const std::string input_query = "select -5 * (0.5 - -0.25) from stdin;" ;
 	  auto s3select_res = run_s3select(input_query);
-    ASSERT_EQ(s3select_res, std::string("-3.750000"));
+    ASSERT_EQ(s3select_res, std::string("-3.75"));
 }
 
 TEST(TestS3selectOperator, div)
 {
     const std::string input_query = "select -5 / (0.5 - -0.25) from stdin;" ;
 	  auto s3select_res = run_s3select(input_query);
-    ASSERT_EQ(s3select_res, std::string("-6.666667"));
+    ASSERT_EQ(s3select_res, std::string("-6.666666666666667"));
 }
 
 TEST(TestS3selectOperator, pow)
 {
     const std::string input_query = "select 5 ^ (0.5 - -0.25) from stdin;" ;
 	  auto s3select_res = run_s3select(input_query);
-    ASSERT_EQ(s3select_res, std::string("3.343702"));
+    ASSERT_EQ(s3select_res, std::string("3.34370152488211"));
 }
 
 TEST(TestS3SElect, from_stdin)
