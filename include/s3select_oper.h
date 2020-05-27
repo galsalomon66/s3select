@@ -311,10 +311,9 @@ public:
 
         if (type != value_En_t::STRING){
                 if (type == value_En_t::DECIMAL){
-			            //m_to_string = std::to_string(__val.num); 
 			            m_to_string.assign( boost::lexical_cast<std::string>(__val.num) );
                 }else if(type == value_En_t::FLOAT){
-                        m_to_string = std::to_string(__val.dbl);
+                        m_to_string = boost::lexical_cast<std::string>(__val.dbl);
                 }else {
                         m_to_string =  to_simple_string( *__val.timestamp );
                 }
