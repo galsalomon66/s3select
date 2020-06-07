@@ -58,7 +58,7 @@ class __function : public base_statement
 {
 
 private:
-    std::vector<base_statement *> arguments;
+    bs_stmt_vec_t arguments;
     std::string name;
     base_function *m_func_impl;
     s3select_functions *m_s3select_functions;
@@ -119,12 +119,12 @@ public:
     }
 
 
-    std::vector<base_statement *> get_arguments()
+    bs_stmt_vec_t & get_arguments()
     {
         return arguments;
     }
 
-    virtual ~__function() {arguments.clear();}
+    virtual ~__function() {}
 };
 
 
@@ -136,9 +136,9 @@ struct _fn_add : public base_function{
 
     value var_result;
 
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
-        std::vector<base_statement*>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         base_statement* x =  *iter;
         iter++;
         base_statement* y = *iter;
@@ -158,9 +158,9 @@ struct _fn_sum : public base_function
 
     _fn_sum() : sum(0) { aggregate = true; }
 
-    bool operator()(std::vector<base_statement *> *args, variable *result)
+    bool operator()(bs_stmt_vec_t *args, variable *result)
     {
-        std::vector<base_statement *>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         base_statement *x = *iter;
 
         try
@@ -186,7 +186,7 @@ struct _fn_count : public base_function{
 
     _fn_count():count(0){aggregate=true;}
 
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
         count += 1;
 
@@ -203,9 +203,9 @@ struct _fn_min : public base_function{
 
     _fn_min():min(__INT64_MAX__){aggregate=true;}
 
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
-        std::vector<base_statement*>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         base_statement* x =  *iter;
 
         if(min > x->eval()) min=x->eval();
@@ -223,9 +223,9 @@ struct _fn_max : public base_function{
 
     _fn_max():max(-__INT64_MAX__){aggregate=true;}
 
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
-        std::vector<base_statement*>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         base_statement* x =  *iter;
 
         if(max < x->eval()) max=x->eval();
@@ -242,7 +242,7 @@ struct _fn_to_int : public base_function{
     value var_result;
     value func_arg;
 
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
         char *perr;
         int64_t i=0;
@@ -269,7 +269,7 @@ struct _fn_to_float : public base_function{
     value var_result;
     value v_from;
 
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
         char *perr;
         double d=0;
@@ -326,14 +326,14 @@ struct _fn_to_timestamp : public base_function
         return true;
     }
 
-    bool operator()(std::vector<base_statement *> *args, variable *result)
+    bool operator()(bs_stmt_vec_t *args, variable *result)
     {
 
         hr = 0;
         mn = 0;
         sc = 0;
 
-        std::vector<base_statement *>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         int args_size = args->size();
 
         if (args_size != 1)
@@ -367,9 +367,9 @@ struct _fn_extact_from_timestamp : public base_function {
 
     value val_date_part;
 
-    bool operator()(std::vector<base_statement *> *args, variable *result)
+    bool operator()(bs_stmt_vec_t *args, variable *result)
     {
-        std::vector<base_statement *>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         int args_size = args->size();
 
         if (args_size < 2)
@@ -424,9 +424,9 @@ struct _fn_diff_timestamp : public base_function {
     value val_dt1;
     value val_dt2;
 
-    bool operator()(std::vector<base_statement *> *args, variable *result)
+    bool operator()(bs_stmt_vec_t *args, variable *result)
     {
-        std::vector<base_statement *>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         int args_size = args->size();
 
         if (args_size < 3)
@@ -487,9 +487,9 @@ struct _fn_add_to_timestamp : public base_function {
     value val_quantity;
     value val_timestamp;
 
-    bool operator()(std::vector<base_statement *> *args, variable *result)
+    bool operator()(bs_stmt_vec_t *args, variable *result)
     {
-        std::vector<base_statement *>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         int args_size = args->size();
 
         if (args_size < 3)
@@ -545,7 +545,7 @@ struct _fn_utcnow : public base_function {
 
 	boost::posix_time::ptime now_ptime;
 
-    bool operator()(std::vector<base_statement *> *args, variable *result)
+    bool operator()(bs_stmt_vec_t *args, variable *result)
     {
         int args_size = args->size();
 
@@ -570,9 +570,9 @@ struct _fn_substr : public base_function{
     value v_from;
     value v_to;
     
-    bool operator()(std::vector<base_statement*> * args,variable * result)
+    bool operator()(bs_stmt_vec_t * args,variable * result)
     {
-        std::vector<base_statement*>::iterator iter = args->begin();
+        bs_stmt_vec_t::iterator iter = args->begin();
         int args_size = args->size();
 
 
@@ -814,7 +814,7 @@ bool base_statement::is_binop_aggregate_and_column(base_statement *skip_expressi
     {
 
         __function* f = (dynamic_cast<__function *>(this));
-        std::vector<base_statement*> l = f->get_arguments();
+        bs_stmt_vec_t l = f->get_arguments();
         for (auto i : l)
         {
             if (i!=skip_expression && i->is_column())

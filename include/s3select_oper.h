@@ -16,6 +16,90 @@ namespace bsc = BOOST_SPIRIT_CLASSIC_NS;
 
 namespace s3selectEngine {
 
+//=== stl allocator definition
+//this allocator is fit for placement new (no calls to heap)
+
+class chunkalloc_out_of_mem
+{
+};
+
+template <typename T, size_t pool_sz>
+class ChunkAllocator : public std::allocator<T>
+{
+public:
+    typedef size_t size_type;
+    typedef T *pointer;
+    typedef const T *const_pointer;
+    size_t __pool_loc;
+    char *__pool;
+
+    //only ONE pool,not allocated dynamically; main assumption, caller knows in advance its memory limitations.
+    char __buff__[pool_sz];
+
+    template <typename _Tp1>
+    struct rebind
+    {
+        typedef ChunkAllocator<_Tp1, pool_sz> other;
+    };
+
+    //==================================
+    inline T *_Allocate(size_t _Count, T *)
+    { // allocate storage for _Count elements of type T
+
+        pointer res = (pointer)(__pool + __pool_loc);
+
+        __pool_loc += sizeof(T) * _Count;
+        //alignment
+        size_t _algn = ((size_t)(__pool_loc) % sizeof(char *));
+        __pool_loc += _algn != 0 ? sizeof(char *) - _algn : 0;
+
+        if (__pool_loc > sizeof(__buff__))
+            throw chunkalloc_out_of_mem();
+
+        return res;
+    }
+
+    //==================================
+    inline pointer allocate(size_type n, const void *hint = 0)
+    {
+        return (_Allocate(n, (pointer)0));
+    }
+
+    //==================================
+    inline void deallocate(pointer p, size_type n)
+    {
+    }
+
+    //==================================
+    ChunkAllocator() throw() : std::allocator<T>()
+    {
+        // alloc from main-buffer
+        __pool_loc = 0;
+        memset( &__buff__[0],0,sizeof(__buff__));
+        __pool = &__buff__[0];
+    }
+
+    //==================================
+    ChunkAllocator(const ChunkAllocator &other) throw() : std::allocator<T>(other)
+    {
+        // copy const
+        __pool_loc = other.__pool_loc;
+        memcpy(&__buff__[0], &other.__buff__[0],sizeof(__buff__) );
+    }
+
+    //==================================
+    ~ChunkAllocator() throw()
+    {
+        //do nothing
+    }
+};
+
+class base_statement;
+//typedef std::vector<base_statement *> bs_stmt_vec_t; //without specific allocator
+
+//ChunkAllocator, prevent allocation from heap.
+typedef std::vector<base_statement *,ChunkAllocator<base_statement *,256> > bs_stmt_vec_t;
+
 class base_s3select_exception
 {
 
@@ -139,7 +223,7 @@ public:
         m_column_name_pos.push_back( std::pair<const char*,int>(n,pos));
     }
 
-    void update(std::vector<char*> tokens,size_t num_of_tokens)
+    void update(std::vector<char*> & tokens,size_t num_of_tokens)
     {
         size_t i=0;
         for(auto s : tokens)
@@ -1070,7 +1154,7 @@ protected:
 public:
     //TODO add semantic to base-function , it operate once on function creation
     // validate semantic on creation instead on run-time     
-    virtual bool operator()(std::vector<base_statement *> *args, variable *result) = 0;
+    virtual bool operator()(bs_stmt_vec_t *args, variable *result) = 0;
     base_function() : aggregate(false) {}
     bool is_aggregate() { return aggregate == true; }
     virtual void get_aggregate_result(variable *) {}

@@ -280,6 +280,9 @@ namespace s3selectEngine
 		//TODO for better performance to use template specialization (\n  \ , ")
 		do
 		{
+			if (p.currentLoc() >= end_stream)
+				break;
+
 			if (p.get_char() == m_row_delimeter)
 			{
 				p.process_event(event_eol());
@@ -305,8 +308,6 @@ namespace s3selectEngine
 			if (p.tokens->capacity() <= p.token_idx)
 				return -1;
 
-			if (p.currentLoc() >= end_stream)
-				break;
 			p.get_next_char();
 
 		} while (p.current_state()[0] != 6);
