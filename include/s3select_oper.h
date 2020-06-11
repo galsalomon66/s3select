@@ -764,6 +764,12 @@ public:
     return compute<binop_plus>(*this, v);
   }
 
+  value operator++(int)
+  {
+    *this = *this + 1;
+    return *this;
+  }
+    
   value& operator-(const value& v)
   {
     return compute<binop_minus>(*this, v);
