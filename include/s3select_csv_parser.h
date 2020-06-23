@@ -52,8 +52,11 @@ struct csvStateMch_ : public msm::front::state_machine_def<csvStateMch_>
     return *input_cur_location;
   }
 
-  char get_next_char()
+  char get_next_char(const char * end_stream)
   {
+    if (input_cur_location >= end_stream)
+      return 0;
+
     input_cur_location++;
     return *input_cur_location;
   }
@@ -375,8 +378,7 @@ public:
       {
         break;
       }
-      p.get_next_char();
-
+      p.get_next_char(end_stream);
     }
     while (p.current_state()[0] != 6);
 
