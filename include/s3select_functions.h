@@ -3,6 +3,8 @@
 
 
 #include "s3select_oper.h"
+#include <boost/algorithm/string.hpp>
+
 #define BOOST_BIND_ACTION_PARAM( push_name ,param ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2, param)
 namespace s3selectEngine
 {
@@ -41,7 +43,9 @@ enum class s3select_func_En_t {ADD,
                                DATE_ADD,
                                DATE_DIFF,
                                UTCNOW,
-                               LENGTH
+                               LENGTH,
+                               LOWER,
+                               UPPER
                               };
 
 
@@ -70,7 +74,9 @@ private:
     {"datediff", s3select_func_En_t::DATE_DIFF},
     {"utcnow", s3select_func_En_t::UTCNOW},
     {"charlength", s3select_func_En_t::LENGTH},
-    {"characterlength", s3select_func_En_t::LENGTH}
+    {"characterlength", s3select_func_En_t::LENGTH},
+    {"lower", s3select_func_En_t::LOWER},
+    {"upper", s3select_func_En_t::UPPER}
   };
 
 public:
@@ -893,6 +899,48 @@ struct _fn_charlength : public base_function {
         }
     };
 
+struct _fn_lower : public base_function {
+
+    std::string buff;
+    value v_str;
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement* str = *iter;
+        v_str = str->eval();
+        if(v_str.type != value::value_En_t::STRING) {
+          throw base_s3select_exception("content is not string");
+        } else {
+            buff = v_str.str();
+            boost::algorithm::to_lower(buff);
+            result->set_value(buff.c_str());         
+            return true;
+        }               
+    }
+};
+
+struct _fn_upper : public base_function {
+
+    std::string buff;
+    value v_str;
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement* str = *iter;
+        v_str = str->eval();
+        if(v_str.type != value::value_En_t::STRING) {
+          throw base_s3select_exception("content is not string");
+        } else {
+            buff = v_str.str();
+            boost::algorithm::to_upper(buff);
+            result->set_value(buff.c_str());         
+            return true;
+        }               
+    }
+};
+
 base_function* s3select_functions::create(std::string fn_name)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
@@ -960,6 +1008,13 @@ base_function* s3select_functions::create(std::string fn_name)
 
   case s3select_func_En_t::AVG:
     return S3SELECT_NEW(_fn_avg);
+
+  case s3select_func_En_t::LOWER:
+    return S3SELECT_NEW(_fn_lower);
+    break;
+
+  case s3select_func_En_t::UPPER:
+    return S3SELECT_NEW(_fn_upper);
     break;
 
   case s3select_func_En_t::LENGTH:
