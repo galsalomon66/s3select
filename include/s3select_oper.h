@@ -397,8 +397,10 @@ public:
 
 private:
   value_t __val;
-  std::string m_to_string;
-  std::string m_str_value;
+  //std::string m_to_string;
+  std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_to_string;
+  //std::string m_str_value;
+  std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_str_value;
 
 public:
   enum class value_En_t
@@ -463,7 +465,7 @@ public:
   }
 
 
-  std::string& to_string()  //TODO very intensive , must improve this
+  std::string to_string()  //TODO very intensive , must improve this
   {
 
     if (type != value_En_t::STRING)
@@ -486,7 +488,7 @@ public:
       m_to_string.assign( __val.str );
     }
 
-    return m_to_string;
+    return std::string( m_to_string.c_str() );
   }
 
 
