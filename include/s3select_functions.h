@@ -49,7 +49,7 @@ class s3select_functions : public __clt_allocator
 private:
 
   using FunctionLibrary = std::map<std::string, s3select_func_En_t>;
-  std::list<base_function*> __all_query_functions;
+  std::list<base_statement*> __all_query_functions;
 
   const FunctionLibrary m_functions_library =
   {
@@ -72,19 +72,12 @@ public:
 
   base_function* create(std::string fn_name);
 
-  void push_for_cleanup(base_function* f)
+  void push_for_cleanup(base_statement* f)
   {
     __all_query_functions.push_back(f);
   }
 
-  void clean()
-  {
-    for(auto d : __all_query_functions)
-    {
-      d->__call_destructor();
-    }
-
-  }
+  void clean();
 };
 
 class __function : public base_statement
@@ -110,11 +103,19 @@ private:
       throw base_s3select_exception("function not found", base_s3select_exception::s3select_exp_en_t::FATAL);  //should abort query
     }
     m_func_impl = f;
-    m_s3select_functions->push_for_cleanup(f);
-
+    m_s3select_functions->push_for_cleanup(this);
+    //placement new is releasing the main-buffer in which all AST nodes
+    //allocated from it. meaning no calls to destructors.
+    //the cleanup method will trigger all destructors.
   }
 
 public:
+
+  base_function* impl()
+  {
+    return m_func_impl;
+  }
+
   virtual void traverse_and_apply(scratch_area* sa, projection_alias* pa)
   {
     m_scratch = sa;
@@ -178,6 +179,18 @@ public:
 };
 
 
+  void s3select_functions::clean()
+  {
+    for(auto d : __all_query_functions)
+    {
+      if (d->is_function())
+      {
+        dynamic_cast<__function*>(d)->impl()->__call_destructor();
+      }
+      d->__call_destructor();
+    }
+
+  }
 
 /*
     s3-select function defintions

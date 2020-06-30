@@ -894,6 +894,11 @@ public:
 
   virtual ~base_statement() {}
 
+  void __call_destructor()
+  {
+    this->~base_statement();
+  }
+
 };
 
 class variable : public base_statement
@@ -1403,7 +1408,7 @@ public:
   virtual ~base_function() {}
   
   virtual void __call_destructor()
-  {
+  {//release function-body implementation 
     this->~base_function();
   }
 };
