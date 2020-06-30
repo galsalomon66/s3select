@@ -681,7 +681,10 @@ public:
     return aggr_flow == true;
   }
 
-  ~s3select() {}
+  ~s3select() 
+  {
+    m_s3select_functions.clean();
+  }
 
 
   template <typename ScannerT>
