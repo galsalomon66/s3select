@@ -185,9 +185,9 @@ public:
     {
       if (d->is_function())
       {
-        dynamic_cast<__function*>(d)->impl()->__call_destructor();
+        dynamic_cast<__function*>(d)->impl()->dtor();
       }
-      d->__call_destructor();
+      d->dtor();
     }
 
   }

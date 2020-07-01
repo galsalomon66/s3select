@@ -31,11 +31,11 @@ public:
   typedef size_t size_type;
   typedef T* pointer;
   typedef const T* const_pointer;
-  size_t __pool_loc;
-  char* __pool;
+  size_t buffer_capacity;
+  char* buffer_ptr;
 
   //only ONE pool,not allocated dynamically; main assumption, caller knows in advance its memory limitations.
-  char __buff__[pool_sz];
+  char buffer[pool_sz];
 
   template <typename _Tp1>
   struct rebind
@@ -44,18 +44,18 @@ public:
   };
 
   //==================================
-  inline T* _Allocate(size_t _Count, T*)
+  inline T* _Allocate(size_t num_of_element, T*)
   {
     // allocate storage for _Count elements of type T
 
-    pointer res = (pointer)(__pool + __pool_loc);
+    pointer res = (pointer)(buffer_ptr + buffer_capacity);
 
-    __pool_loc += sizeof(T) * _Count;
-    //alignment
-    size_t _algn = ((size_t)(__pool_loc) % sizeof(char*));
-    __pool_loc += _algn != 0 ? sizeof(char*) - _algn : 0;
+    buffer_capacity+= sizeof(T) * num_of_element;
+    
+    size_t addr_alignment = (buffer_capacity % sizeof(char*));
+    buffer_capacity += addr_alignment != 0 ? sizeof(char*) - addr_alignment : 0;
 
-    if (__pool_loc > sizeof(__buff__))
+    if (buffer_capacity> sizeof(buffer))
     {
       throw chunkalloc_out_of_mem();
     }
@@ -78,17 +78,17 @@ public:
   ChunkAllocator() throw() : std::allocator<T>()
   {
     // alloc from main-buffer
-    __pool_loc = 0;
-    memset( &__buff__[0], 0, sizeof(__buff__));
-    __pool = &__buff__[0];
+    buffer_capacity = 0;
+    memset( &buffer[0], 0, sizeof(buffer));
+    buffer_ptr = &buffer[0];
   }
 
   //==================================
   ChunkAllocator(const ChunkAllocator& other) throw() : std::allocator<T>(other)
   {
     // copy const
-    __pool_loc = 0;
-    __pool = &__buff__[0];
+    buffer_capacity = 0;
+    buffer_ptr = &buffer[0];
   }
 
   //==================================
@@ -894,7 +894,7 @@ public:
 
   virtual ~base_statement() {}
 
-  void __call_destructor()
+  void dtor()
   {
     this->~base_statement();
   }
@@ -1407,7 +1407,7 @@ public:
 
   virtual ~base_function() {}
   
-  virtual void __call_destructor()
+  virtual void dtor()
   {//release function-body implementation 
     this->~base_function();
   }
