@@ -105,7 +105,7 @@ private:
     m_func_impl = f;
     m_s3select_functions->push_for_cleanup(this);
     //placement new is releasing the main-buffer in which all AST nodes
-    //allocated from it. meaning no calls to destructors.
+    //allocating from it. meaning no calls to destructors.
     //the cleanup method will trigger all destructors.
   }
 

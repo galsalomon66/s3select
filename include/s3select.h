@@ -418,6 +418,34 @@ struct push_logical_predicate : public base_action
 };
 static push_logical_predicate g_push_logical_predicate;
 
+struct push_negation : public base_action
+{
+    void operator()(const char* a, const char* b) const
+  {
+    std::string token(a, b);
+    base_statement * pred;
+    if (m_action->condQ.empty() == false)
+    {
+      pred = m_action->condQ.back();
+      m_action->condQ.pop_back();
+    }
+    //upon NOT operator, the logical and arithmetical operators are "tagged" to negate result.
+    if (dynamic_cast<logical_operand*>(pred))
+    {
+      logical_operand* f = S3SELECT_NEW(logical_operand,pred);
+      m_action->condQ.push_back(f);
+    }
+    else
+    {
+      arithmetic_operand* f = S3SELECT_NEW(arithmetic_operand,pred);
+      m_action->condQ.push_back(f);
+    }
+
+    
+  }
+};
+static push_negation g_push_negation;
+
 struct push_column_pos : public base_action
 {
   void operator()(const char* a, const char* b) const
@@ -606,6 +634,7 @@ public:
     ATTACH_ACTION_Q(push_number);
     ATTACH_ACTION_Q(push_logical_operator);
     ATTACH_ACTION_Q(push_logical_predicate);
+    ATTACH_ACTION_Q(push_negation);
     ATTACH_ACTION_Q(push_compare_operator);
     ATTACH_ACTION_Q(push_arithmetic_predicate);
     ATTACH_ACTION_Q(push_addsub);
@@ -711,7 +740,9 @@ public:
 
       where_clause = bsc::str_p("where") >> condition_expression;
 
-      condition_expression = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
+      condition_expression =  ( bsc::str_p("not") >> binary_condition )[BOOST_BIND_ACTION(push_negation)] | binary_condition;
+      
+      binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
 
       arithmetic_predicate = (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
 
@@ -746,13 +777,13 @@ public:
 
       arith_cmp = bsc::str_p(">=") | bsc::str_p("<=") | bsc::str_p("==") | bsc::str_p("<") | bsc::str_p(">") | bsc::str_p("!=");
 
-      log_op = bsc::str_p("and") | bsc::str_p("or"); //TODO add NOT (unary)
+      log_op = bsc::str_p("and") | bsc::str_p("or");
 
       variable =  bsc::lexeme_d[(+bsc::alpha_p >> *bsc::digit_p)];
     }
 
 
-    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, arithmetic_predicate, factor;
+    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
