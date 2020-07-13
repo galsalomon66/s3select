@@ -28,10 +28,11 @@ std::string run_expression_in_C_prog(const char* expression)
   {
     prog_c = (char*)malloc(C_FILE_SIZE);
 
-    size_t sz=sprintf(prog_c, "#include <stdio.h>\n \
+		size_t sz=sprintf(prog_c,"#include <stdio.h>\n \
+				#include <float.h>\n \
 				int main() \
 				{\
-				printf(\"%%f\\n\",(double)(%s));\
+				printf(\"%%.*e\\n\",DECIMAL_DIG,(double)(%s));\
 				} ", expression);
 
     int status = fwrite(prog_c, 1, sz, fp_c_file);
@@ -221,24 +222,210 @@ TEST(TestS3SElect, arithmetic_operator)
   ASSERT_EQ( ( (a+b) * (c+d) ).i64(), 21 );
 }
 
-TEST(TestS3SElect, timestamp_function)
+TEST(TestS3selectFunctions, timestamp)
 {
-  // TODO: support formats listed here:
-  // https://docs.aws.amazon.com/AmazonS3/latest/dev/s3-glacier-select-sql-reference-date.html#s3-glacier-select-sql-reference-to-timestamp
-  const std::string timestamp = "2007-02-23:14:33:01";
-  // TODO: out_simestamp should be the same as timestamp
-  const std::string out_timestamp = "2007-Feb-23 14:33:01";
-  const std::string input_query = "select timestamp(\"" + timestamp + "\") from stdin;" ;
-  std::string s3select_res = run_s3select(input_query);
-  ASSERT_EQ(s3select_res, out_timestamp);
+    // TODO: support formats listed here:
+    // https://docs.aws.amazon.com/AmazonS3/latest/dev/s3-glacier-select-sql-reference-date.html#s3-glacier-select-sql-reference-to-timestamp
+    const std::string timestamp = "2007-02-23:14:33:01";
+    // TODO: out_simestamp should be the same as timestamp
+    const std::string out_timestamp = "2007-Feb-23 14:33:01";
+    const std::string input_query = "select timestamp(\"" + timestamp + "\") from stdin;" ;
+	  const auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, out_timestamp);
 }
 
-TEST(TestS3SElect, utcnow_function)
+TEST(TestS3selectFunctions, utcnow)
 {
-  const boost::posix_time::ptime now(boost::posix_time::second_clock::universal_time());
-  const std::string input_query = "select utcnow() from stdin;" ;
-  auto s3select_res = run_s3select(input_query);
-  const boost::posix_time::ptime res_now;
-  ASSERT_EQ(s3select_res, boost::posix_time::to_simple_string(now));
+    const boost::posix_time::ptime now(boost::posix_time::second_clock::universal_time());
+    const std::string input_query = "select utcnow() from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    const boost::posix_time::ptime res_now;
+    ASSERT_EQ(s3select_res, boost::posix_time::to_simple_string(now));
+}
+
+TEST(TestS3selectFunctions, add)
+{
+    const std::string input_query = "select add(-5, 0.5) from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("-4.5"));
+}
+
+void generate_csv(std::string& out, size_t size) {
+  // schema is: int, float, string, string
+  std::stringstream ss;
+  for (auto i = 0U; i < size; ++i) {
+    ss << i << "," << i/10.0 << "," << "foo"+std::to_string(i) << "," << std::to_string(i)+"bar" << std::endl;
+  }
+  out = ss.str();
+}
+
+TEST(TestS3selectFunctions, sum)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select sum(int(_1)), sum(float(_2)) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string("8128,812.80000000000007,"));
+}
+
+TEST(TestS3selectFunctions, count)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select count(*) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string("128,"));
+}
+
+TEST(TestS3selectFunctions, min)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select min(int(_1)), min(float(_2)) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string("0,0,"));
+}
+
+TEST(TestS3selectFunctions, max)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select max(int(_1)), max(float(_2)) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string("127,12.699999999999999,"));
+}
+
+TEST(TestS3selectOperator, add)
+{
+    const std::string input_query = "select -5 + 0.5 + -0.25 from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("-4.75"));
+}
+
+TEST(TestS3selectOperator, sub)
+{
+    const std::string input_query = "select -5 - 0.5 - -0.25 from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("-5.25"));
+}
+
+TEST(TestS3selectOperator, mul)
+{
+    const std::string input_query = "select -5 * (0.5 - -0.25) from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("-3.75"));
+}
+
+TEST(TestS3selectOperator, div)
+{
+    const std::string input_query = "select -5 / (0.5 - -0.25) from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("-6.666666666666667"));
+}
+
+TEST(TestS3selectOperator, pow)
+{
+    const std::string input_query = "select 5 ^ (0.5 - -0.25) from stdin;" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("3.34370152488211"));
+}
+
+TEST(TestS3selectOperator, not_operator)
+{
+    const std::string input_query = "select \"true\" from stdin where not ( (1+4) == 2 ) and (not(1 > (5*6)));" ;
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, std::string("true"));
+}
+
+TEST(TestS3SElect, from_stdin)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select * from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(),
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+}
+
+TEST(TestS3SElect, from_valid_object)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select * from /objectname;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+}
+
+TEST(TestS3SElect, from_invalid_object)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select sum(1) from file.txt;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, -1);
+	  auto s3select_res = run_s3select(input_query);
+    ASSERT_EQ(s3select_res, "");
 }
 

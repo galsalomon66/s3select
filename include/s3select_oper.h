@@ -1132,7 +1132,8 @@ private:
 
   cmp_t _cmp;
   value var_value;
-
+  bool negation_result;//false: dont negate ; upon NOT operator(unary) its true
+  
 public:
 
   virtual bool semantic()
@@ -1162,27 +1163,27 @@ public:
     switch (_cmp)
     {
     case cmp_t::EQ:
-      return var_value = (l->eval() == r->eval());
+      return var_value =  bool( (l->eval() == r->eval()) ^ negation_result );
       break;
 
     case cmp_t::LE:
-      return var_value = (l->eval() <= r->eval());
+      return var_value = bool( (l->eval() <= r->eval()) ^ negation_result );
       break;
 
     case cmp_t::GE:
-      return var_value = (l->eval() >= r->eval());
+      return var_value = bool( (l->eval() >= r->eval()) ^ negation_result );
       break;
 
     case cmp_t::NE:
-      return var_value = (l->eval() != r->eval());
+      return var_value = bool( (l->eval() != r->eval()) ^ negation_result );
       break;
 
     case cmp_t::GT:
-      return var_value = (l->eval() > r->eval());
+      return var_value = bool( (l->eval() > r->eval()) ^ negation_result );
       break;
 
     case cmp_t::LT:
-      return var_value = (l->eval() < r->eval());
+      return var_value = bool( (l->eval() < r->eval()) ^ negation_result );
       break;
 
     default:
@@ -1191,7 +1192,16 @@ public:
     }
   }
 
-  arithmetic_operand(base_statement* _l, cmp_t c, base_statement* _r):l(_l), r(_r), _cmp(c) {}
+  arithmetic_operand(base_statement* _l, cmp_t c, base_statement* _r):l(_l), r(_r), _cmp(c),negation_result(false) {}
+  
+  arithmetic_operand(base_statement* p)//NOT operator 
+  {
+    l = dynamic_cast<arithmetic_operand*>(p)->l;
+    r = dynamic_cast<arithmetic_operand*>(p)->r;
+    _cmp = dynamic_cast<arithmetic_operand*>(p)->_cmp;
+    // not( not ( logical expression )) == ( logical expression ); there is no limitation for number of NOT.
+    negation_result = ! dynamic_cast<arithmetic_operand*>(p)->negation_result;
+  }
 
   virtual ~arithmetic_operand() {}
 };
@@ -1209,6 +1219,7 @@ private:
 
   oplog_t _oplog;
   value var_value;
+  bool negation_result;//false: dont negate ; upon NOT operator(unary) its true
 
 public:
 
@@ -1226,7 +1237,16 @@ public:
     return true;
   }
 
-  logical_operand(base_statement* _l, oplog_t _o, base_statement* _r):l(_l), r(_r), _oplog(_o) {}
+  logical_operand(base_statement* _l, oplog_t _o, base_statement* _r):l(_l), r(_r), _oplog(_o),negation_result(false) {}
+
+  logical_operand(base_statement * p)//NOT operator
+  {
+    l = dynamic_cast<logical_operand*>(p)->l;
+    r = dynamic_cast<logical_operand*>(p)->r;
+    _oplog = dynamic_cast<logical_operand*>(p)->_oplog;
+    // not( not ( logical expression )) == ( logical expression ); there is no limitation for number of NOT.
+    negation_result = ! dynamic_cast<logical_operand*>(p)->negation_result; 
+  }
 
   virtual ~logical_operand() {}
 
@@ -1237,14 +1257,15 @@ public:
     return std::string("#");//TBD
   }
   virtual value& eval()
-  {
+  {bool res;
     if (_oplog == oplog_t::AND)
     {
       if (!l || !r)
       {
         throw base_s3select_exception("missing operand for logical and", base_s3select_exception::s3select_exp_en_t::FATAL);
       }
-      return var_value =  (l->eval().i64() && r->eval().i64());
+       res =  (l->eval().i64() && r->eval().i64()) ^ negation_result ;
+
     }
     else
     {
@@ -1252,8 +1273,10 @@ public:
       {
         throw base_s3select_exception("missing operand for logical or", base_s3select_exception::s3select_exp_en_t::FATAL);
       }
-      return var_value =  (l->eval().i64() || r->eval().i64());
+       res =  (l->eval().i64() || r->eval().i64()) ^ negation_result;
     }
+
+    return var_value = res;
   }
 
 };
