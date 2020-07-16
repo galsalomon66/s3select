@@ -43,7 +43,7 @@ enum class s3select_func_En_t {ADD,
                               };
 
 
-class s3select_functions : public __clt_allocator
+class s3select_functions
 {
 
 private:

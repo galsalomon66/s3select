@@ -1,5 +1,6 @@
 #ifndef __S3SELECT__
 #define __S3SELECT__
+#define BOOST_SPIRIT_THREADSAFE
 
 #include <boost/spirit/include/classic_core.hpp>
 #include <boost/algorithm/string.hpp>
@@ -70,35 +71,24 @@ struct actionQ
 
 };
 
-class base_action : public __clt_allocator
+static actionQ* astBuilder()
 {
+  return S3C::inst()->getAction();
+}
 
-public:
-  base_action() : m_action(0), m_s3select_functions(0) {}
-  actionQ* m_action;
-  void set_action_q(actionQ* a)
-  {
-    m_action = a;
-  }
-  void set_s3select_functions(s3select_functions* s3f)
-  {
-    m_s3select_functions = s3f;
-  }
-  s3select_functions* m_s3select_functions;
-};
-
-struct push_from_clause : public base_action
+struct push_from_clause
 {
   void operator()(const char* a, const char* b) const
   {
     std::string token(a, b);
-    m_action->from_clause = token;
+
+    astBuilder()->from_clause = token;
   }
 
 };
 static push_from_clause g_push_from_clause;
 
-struct push_number : public base_action //TODO use define for defintion of actions
+struct push_number
 {
   void operator()(const char* a, const char* b) const
   {
@@ -106,13 +96,13 @@ struct push_number : public base_action //TODO use define for defintion of actio
     variable* v = S3SELECT_NEW( variable, atoi(token.c_str()));
 
 
-    m_action->exprQ.push_back(v);
+    astBuilder()->exprQ.push_back(v);
   }
 
 };
 static push_number g_push_number;
 
-struct push_float_number : public base_action //TODO use define for defintion of actions
+struct push_float_number 
 {
 
   void operator()(const char* a, const char* b) const
@@ -128,20 +118,20 @@ struct push_float_number : public base_action //TODO use define for defintion of
       double d = strtod(token.c_str(), &perr);
       variable* v = S3SELECT_NEW( variable, d);
 
-      m_action->exprQ.push_back(v);
+      astBuilder()->exprQ.push_back(v);
     }
     else
     {
       variable* v = S3SELECT_NEW(variable, atoi(token.c_str()));
 
-      m_action->exprQ.push_back(v);
+      astBuilder()->exprQ.push_back(v);
     }
   }
 
 };
 static push_float_number g_push_float_number;
 
-struct push_string : public base_action //TODO use define for defintion of actions
+struct push_string 
 {
 
   void operator()(const char* a, const char* b) const
@@ -152,13 +142,13 @@ struct push_string : public base_action //TODO use define for defintion of actio
 
     variable* v = S3SELECT_NEW(variable, token, variable::var_t::COL_VALUE );
 
-    m_action->exprQ.push_back(v);
+    astBuilder()->exprQ.push_back(v);
   }
 
 };
 static push_string g_push_string;
 
-struct push_variable : public base_action
+struct push_variable 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -166,13 +156,13 @@ struct push_variable : public base_action
 
     variable* v = S3SELECT_NEW(variable, token);
 
-    m_action->exprQ.push_back(v);
+    astBuilder()->exprQ.push_back(v);
   }
 };
 static push_variable g_push_variable;
 
 /////////////////////////arithmetic unit  /////////////////
-struct push_addsub : public base_action
+struct push_addsub 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -180,17 +170,17 @@ struct push_addsub : public base_action
 
     if (token.compare("+") == 0)
     {
-      m_action->addsubQ.push_back(addsub_operation::addsub_op_t::ADD);
+      astBuilder()->addsubQ.push_back(addsub_operation::addsub_op_t::ADD);
     }
     else
     {
-      m_action->addsubQ.push_back(addsub_operation::addsub_op_t::SUB);
+      astBuilder()->addsubQ.push_back(addsub_operation::addsub_op_t::SUB);
     }
   }
 };
 static push_addsub g_push_addsub;
 
-struct push_mulop : public base_action
+struct push_mulop 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -198,65 +188,65 @@ struct push_mulop : public base_action
 
     if (token.compare("*") == 0)
     {
-      m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::MULL);
+      astBuilder()->muldivQ.push_back(mulldiv_operation::muldiv_t::MULL);
     }
     else if (token.compare("/") == 0)
     {
-      m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::DIV);
+      astBuilder()->muldivQ.push_back(mulldiv_operation::muldiv_t::DIV);
     }
     else
     {
-      m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::POW);
+      astBuilder()->muldivQ.push_back(mulldiv_operation::muldiv_t::POW);
     }
   }
 };
 static push_mulop g_push_mulop;
 
-struct push_addsub_binop : public base_action
+struct push_addsub_binop 
 {
   void operator()(const char* a, const char* b) const
   {
     base_statement* l = 0, *r = 0;
 
-    r = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
-    l = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
-    addsub_operation::addsub_op_t o = m_action->addsubQ.back();
-    m_action->addsubQ.pop_back();
+    r = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
+    l = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
+    addsub_operation::addsub_op_t o = astBuilder()->addsubQ.back();
+    astBuilder()->addsubQ.pop_back();
     addsub_operation* as = S3SELECT_NEW(addsub_operation, l, o, r);
-    m_action->exprQ.push_back(as);
+    astBuilder()->exprQ.push_back(as);
   }
 };
 static push_addsub_binop g_push_addsub_binop;
 
-struct push_mulldiv_binop : public base_action
+struct push_mulldiv_binop 
 {
   void operator()(const char* a, const char* b) const
   {
     base_statement* vl = 0, *vr = 0;
 
-    vr = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
-    vl = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
-    mulldiv_operation::muldiv_t o = m_action->muldivQ.back();
-    m_action->muldivQ.pop_back();
+    vr = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
+    vl = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
+    mulldiv_operation::muldiv_t o = astBuilder()->muldivQ.back();
+    astBuilder()->muldivQ.pop_back();
     mulldiv_operation* f = S3SELECT_NEW(mulldiv_operation, vl, o, vr);
-    m_action->exprQ.push_back(f);
+    astBuilder()->exprQ.push_back(f);
   }
 };
 static push_mulldiv_binop g_push_mulldiv_binop;
 
-struct push_function_arg : public base_action
+struct push_function_arg 
 {
   void operator()(const char* a, const char* b) const
   {
     std::string token(a, b);
 
-    base_statement* be = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
-    base_statement* f = m_action->funcQ.back();
+    base_statement* be = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
+    base_statement* f = astBuilder()->funcQ.back();
 
     if (dynamic_cast<__function*>(f))
     {
@@ -266,7 +256,7 @@ struct push_function_arg : public base_action
 };
 static push_function_arg g_push_function_arg;
 
-struct push_function_name : public base_action
+struct push_function_name 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -279,29 +269,29 @@ struct push_function_name : public base_action
     std::string fn;
     fn.assign(a, b-a+1);
 
-    __function* func = S3SELECT_NEW(__function, fn.c_str(), m_s3select_functions);
-    m_action->funcQ.push_back(func);
+    __function* func = S3SELECT_NEW(__function, fn.c_str(), S3C::inst()->getS3F());
+    astBuilder()->funcQ.push_back(func);
   }
 };
 static push_function_name g_push_function_name;
 
-struct push_function_expr : public base_action
+struct push_function_expr 
 {
   void operator()(const char* a, const char* b) const
   {
     std::string token(a, b);
 
-    base_statement* func = m_action->funcQ.back();
-    m_action->funcQ.pop_back();
+    base_statement* func = astBuilder()->funcQ.back();
+    astBuilder()->funcQ.pop_back();
 
-    m_action->exprQ.push_back(func);
+    astBuilder()->exprQ.push_back(func);
   }
 };
 static push_function_expr g_push_function_expr;
 
 ////////////////////// logical unit ////////////////////////
 
-struct push_compare_operator : public base_action
+struct push_compare_operator 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -337,12 +327,12 @@ struct push_compare_operator : public base_action
       c = arithmetic_operand::cmp_t::NA;
     }
 
-    m_action->arithmetic_compareQ.push_back(c);
+    astBuilder()->arithmetic_compareQ.push_back(c);
   }
 };
 static push_compare_operator g_push_compare_operator;
 
-struct push_logical_operator : public base_action
+struct push_logical_operator 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -362,34 +352,34 @@ struct push_logical_operator : public base_action
       l = logical_operand::oplog_t::NA;
     }
 
-    m_action->logical_compareQ.push_back(l);
+    astBuilder()->logical_compareQ.push_back(l);
 
   }
 };
 static push_logical_operator g_push_logical_operator;
 
-struct push_arithmetic_predicate : public base_action
+struct push_arithmetic_predicate 
 {
   void operator()(const char* a, const char* b) const
   {
     std::string token(a, b);
 
     base_statement* vr, *vl;
-    arithmetic_operand::cmp_t c = m_action->arithmetic_compareQ.back();
-    m_action->arithmetic_compareQ.pop_back();
-    vr = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
-    vl = m_action->exprQ.back();
-    m_action->exprQ.pop_back();
+    arithmetic_operand::cmp_t c = astBuilder()->arithmetic_compareQ.back();
+    astBuilder()->arithmetic_compareQ.pop_back();
+    vr = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
+    vl = astBuilder()->exprQ.back();
+    astBuilder()->exprQ.pop_back();
 
     arithmetic_operand* t = S3SELECT_NEW(arithmetic_operand, vl, c, vr);
 
-    m_action->condQ.push_back(t);
+    astBuilder()->condQ.push_back(t);
   }
 };
 static push_arithmetic_predicate g_push_arithmetic_predicate;
 
-struct push_logical_predicate : public base_action
+struct push_logical_predicate 
 {
 
   void operator()(const char* a, const char* b) const
@@ -397,48 +387,48 @@ struct push_logical_predicate : public base_action
     std::string token(a, b);
 
     base_statement* tl = 0, *tr = 0;
-    logical_operand::oplog_t oplog = m_action->logical_compareQ.back();
-    m_action->logical_compareQ.pop_back();
+    logical_operand::oplog_t oplog = astBuilder()->logical_compareQ.back();
+    astBuilder()->logical_compareQ.pop_back();
 
-    if (m_action->condQ.empty() == false)
+    if (astBuilder()->condQ.empty() == false)
     {
-      tr = m_action->condQ.back();
-      m_action->condQ.pop_back();
+      tr = astBuilder()->condQ.back();
+      astBuilder()->condQ.pop_back();
     }
-    if (m_action->condQ.empty() == false)
+    if (astBuilder()->condQ.empty() == false)
     {
-      tl = m_action->condQ.back();
-      m_action->condQ.pop_back();
+      tl = astBuilder()->condQ.back();
+      astBuilder()->condQ.pop_back();
     }
 
     logical_operand* f = S3SELECT_NEW(logical_operand, tl, oplog, tr);
 
-    m_action->condQ.push_back(f);
+    astBuilder()->condQ.push_back(f);
   }
 };
 static push_logical_predicate g_push_logical_predicate;
 
-struct push_negation : public base_action
+struct push_negation 
 {
     void operator()(const char* a, const char* b) const
   {
     std::string token(a, b);
     base_statement * pred;
-    if (m_action->condQ.empty() == false)
+    if (astBuilder()->condQ.empty() == false)
     {
-      pred = m_action->condQ.back();
-      m_action->condQ.pop_back();
+      pred = astBuilder()->condQ.back();
+      astBuilder()->condQ.pop_back();
     }
     //upon NOT operator, the logical and arithmetical operators are "tagged" to negate result.
     if (dynamic_cast<logical_operand*>(pred))
     {
       logical_operand* f = S3SELECT_NEW(logical_operand,pred);
-      m_action->condQ.push_back(f);
+      astBuilder()->condQ.push_back(f);
     }
     else
     {
       arithmetic_operand* f = S3SELECT_NEW(arithmetic_operand,pred);
-      m_action->condQ.push_back(f);
+      astBuilder()->condQ.push_back(f);
     }
 
     
@@ -446,7 +436,7 @@ struct push_negation : public base_action
 };
 static push_negation g_push_negation;
 
-struct push_column_pos : public base_action
+struct push_column_pos 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -462,26 +452,26 @@ struct push_column_pos : public base_action
       v = S3SELECT_NEW(variable, token, variable::var_t::POS);
     }
 
-    m_action->exprQ.push_back(v);
+    astBuilder()->exprQ.push_back(v);
   }
 
 };
 static  push_column_pos g_push_column_pos;
 
-struct push_projection : public base_action
+struct push_projection 
 {
   void operator()(const char* a, const char* b) const
   {
     std::string token(a, b);
 
-    m_action->projections.get()->push_back( m_action->exprQ.back() );
-    m_action->exprQ.pop_back();
+    astBuilder()->projections.get()->push_back( astBuilder()->exprQ.back() );
+    astBuilder()->exprQ.pop_back();
   }
 
 };
 static push_projection g_push_projection;
 
-struct push_alias_projection : public base_action
+struct push_alias_projection 
 {
   void operator()(const char* a, const char* b) const
   {
@@ -490,38 +480,24 @@ struct push_alias_projection : public base_action
     const char* p=b;
     while(*(--p) != ' ');
     std::string alias_name(p+1, b);
-    base_statement*  bs = m_action->exprQ.back();
+    base_statement*  bs = astBuilder()->exprQ.back();
 
     //mapping alias name to base-statement
-    bool res = m_action->alias_map.insert_new_entry(alias_name, bs);
+    bool res = astBuilder()->alias_map.insert_new_entry(alias_name, bs);
     if (res==false)
     {
       throw base_s3select_exception(std::string("alias <")+alias_name+std::string("> is already been used in query"), base_s3select_exception::s3select_exp_en_t::FATAL);
     }
 
 
-    m_action->projections.get()->push_back( bs );
-    m_action->exprQ.pop_back();
+    astBuilder()->projections.get()->push_back( bs );
+    astBuilder()->exprQ.pop_back();
   }
 
 };
 static push_alias_projection g_push_alias_projection;
 
-/// for the schema description "mini-parser"
-struct push_column : public base_action
-{
-
-  void operator()(const char* a, const char* b) const
-  {
-    std::string token(a, b);
-
-    m_action->schema_columns.push_back(token);
-  }
-
-};
-static push_column g_push_column;
-
-struct push_debug_1 : public base_action
+struct push_debug_1 
 {
 
   void operator()(const char* a, const char* b) const
@@ -549,10 +525,8 @@ private:
   bool aggr_flow;
 
 #define BOOST_BIND_ACTION( push_name ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2)
-#define ATTACH_ACTION_Q( push_name ) {(g_ ## push_name).set_action_q(&m_actionQ); (g_ ## push_name).set_s3select_functions(&m_s3select_functions); (g_ ## push_name).set(&m_s3select_allocator);}
 
 public:
-
 
   int semantic()
   {
@@ -594,6 +568,11 @@ public:
       return 0;  //already parsed
     }
 
+    S3C::inst()->set(&m_actionQ,&m_s3select_allocator,&m_s3select_functions);
+
+    error_description.clear();
+    aggr_flow = false;
+
     try
     {
       bsc::parse_info<> info = bsc::parse(input_query, *this, bsc::space_p);
@@ -628,35 +607,6 @@ public:
 
   s3select()
   {
-    //TODO check option for defining action and push into list
-
-    ATTACH_ACTION_Q(push_from_clause);
-    ATTACH_ACTION_Q(push_number);
-    ATTACH_ACTION_Q(push_logical_operator);
-    ATTACH_ACTION_Q(push_logical_predicate);
-    ATTACH_ACTION_Q(push_negation);
-    ATTACH_ACTION_Q(push_compare_operator);
-    ATTACH_ACTION_Q(push_arithmetic_predicate);
-    ATTACH_ACTION_Q(push_addsub);
-    ATTACH_ACTION_Q(push_addsub_binop);
-    ATTACH_ACTION_Q(push_mulop);
-    ATTACH_ACTION_Q(push_mulldiv_binop);
-    ATTACH_ACTION_Q(push_function_arg);
-    ATTACH_ACTION_Q(push_function_name);
-    ATTACH_ACTION_Q(push_function_expr);
-    ATTACH_ACTION_Q(push_float_number);
-    ATTACH_ACTION_Q(push_string);
-    ATTACH_ACTION_Q(push_variable);
-    ATTACH_ACTION_Q(push_column_pos);
-    ATTACH_ACTION_Q(push_projection);
-    ATTACH_ACTION_Q(push_alias_projection);
-    ATTACH_ACTION_Q(push_debug_1);
-
-    error_description.clear();
-
-    m_s3select_functions.set(&m_s3select_allocator);
-
-    aggr_flow = false;
   }
 
   bool is_semantic()//TBD traverse and validate semantics per all nodes

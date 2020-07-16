@@ -17,6 +17,70 @@ namespace bsc = BOOST_SPIRIT_CLASSIC_NS;
 namespace s3selectEngine
 {
 
+class actionQ;
+class s3select_functions;
+class s3select_allocator;
+typedef struct s3select_parser_context
+{
+  actionQ* m_action;
+  s3select_functions* m_s3select_functions;//no-need ?
+  s3select_allocator* m_s3select_allocator;
+
+} s3select_parser_context_t;
+
+class S3C
+{//purpose: maintains per thread context
+  private:
+  
+  static S3C* instance;
+
+  static __thread s3select_parser_context_t g_thread_s3select_context;
+
+  S3C(){}
+
+  public:
+
+  static S3C *inst()
+  {
+    if (instance==0)
+    {
+      instance = new (S3C);
+    }
+    return instance;
+  }
+
+  actionQ* getAction()
+  {
+    return g_thread_s3select_context.m_action;
+  }
+
+  s3select_allocator* getAllocator()
+  {
+    return g_thread_s3select_context.m_s3select_allocator;
+  }
+
+  s3select_functions* getS3F()
+  {
+    return g_thread_s3select_context.m_s3select_functions;
+  }
+
+  void set(actionQ* act,s3select_allocator* alloc,s3select_functions* funcs)
+  {
+    g_thread_s3select_context.m_action = act;
+    g_thread_s3select_context.m_s3select_allocator = alloc;
+    g_thread_s3select_context.m_s3select_functions = funcs;
+  }
+
+  ~S3C()
+  {
+    delete instance;
+    instance = 0;
+  }
+};
+
+S3C* S3C::instance = 0;
+__thread s3select_parser_context_t S3C::g_thread_s3select_context;
+
 //=== stl allocator definition
 //this allocator is fit for placement new (no calls to heap)
 
@@ -205,29 +269,14 @@ public:
   }
 };
 
-class __clt_allocator
-{
-public:
-  s3select_allocator* m_s3select_allocator;
-
-public:
-
-  __clt_allocator():m_s3select_allocator(0) {}
-
-  void set(s3select_allocator* a)
-  {
-    m_s3select_allocator = a;
-  }
-};
-
 // placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
 #define S3SELECT_NEW( type , ... ) [=]() \
         {   \
-            m_s3select_allocator->check_capacity(sizeof( type )); \
-            m_s3select_allocator->set_global_buff(); \
+            S3C::inst()->getAllocator()->check_capacity(sizeof( type )); \
+            S3C::inst()->getAllocator()->set_global_buff(); \
             auto res=new (_s3select_buff_ptr) type(__VA_ARGS__); \
-            m_s3select_allocator->inc(sizeof( type )); \
-            m_s3select_allocator->zero(); \
+            S3C::inst()->getAllocator()->inc(sizeof( type )); \
+            S3C::inst()->getAllocator()->zero(); \
             return res; \
         }();
 
