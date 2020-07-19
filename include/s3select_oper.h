@@ -17,6 +17,70 @@ namespace bsc = BOOST_SPIRIT_CLASSIC_NS;
 namespace s3selectEngine
 {
 
+class actionQ;
+class s3select_functions;
+class s3select_allocator;
+typedef struct s3select_parser_context
+{
+  actionQ* m_action;
+  s3select_functions* m_s3select_functions;//no-need ?
+  s3select_allocator* m_s3select_allocator;
+
+} s3select_parser_context_t;
+
+class S3C
+{//purpose: maintains per thread context
+  private:
+  
+  static S3C* instance;
+
+  static __thread s3select_parser_context_t g_thread_s3select_context;
+
+  S3C(){}
+
+  public:
+
+  static S3C *inst()
+  {
+    if (instance==0)
+    {
+      instance = new (S3C);
+    }
+    return instance;
+  }
+
+  actionQ* getAction()
+  {
+    return g_thread_s3select_context.m_action;
+  }
+
+  s3select_allocator* getAllocator()
+  {
+    return g_thread_s3select_context.m_s3select_allocator;
+  }
+
+  s3select_functions* getS3F()
+  {
+    return g_thread_s3select_context.m_s3select_functions;
+  }
+
+  void set(actionQ* act,s3select_allocator* alloc,s3select_functions* funcs)
+  {
+    g_thread_s3select_context.m_action = act;
+    g_thread_s3select_context.m_s3select_allocator = alloc;
+    g_thread_s3select_context.m_s3select_functions = funcs;
+  }
+
+  ~S3C()
+  {
+    delete instance;
+    instance = 0;
+  }
+};
+
+S3C* S3C::instance = 0;
+__thread s3select_parser_context_t S3C::g_thread_s3select_context;
+
 //=== stl allocator definition
 //this allocator is fit for placement new (no calls to heap)
 
@@ -31,11 +95,11 @@ public:
   typedef size_t size_type;
   typedef T* pointer;
   typedef const T* const_pointer;
-  size_t __pool_loc;
-  char* __pool;
+  size_t buffer_capacity;
+  char* buffer_ptr;
 
   //only ONE pool,not allocated dynamically; main assumption, caller knows in advance its memory limitations.
-  char __buff__[pool_sz];
+  char buffer[pool_sz];
 
   template <typename _Tp1>
   struct rebind
@@ -44,18 +108,18 @@ public:
   };
 
   //==================================
-  inline T* _Allocate(size_t _Count, T*)
+  inline T* _Allocate(size_t num_of_element, T*)
   {
     // allocate storage for _Count elements of type T
 
-    pointer res = (pointer)(__pool + __pool_loc);
+    pointer res = (pointer)(buffer_ptr + buffer_capacity);
 
-    __pool_loc += sizeof(T) * _Count;
-    //alignment
-    size_t _algn = ((size_t)(__pool_loc) % sizeof(char*));
-    __pool_loc += _algn != 0 ? sizeof(char*) - _algn : 0;
+    buffer_capacity+= sizeof(T) * num_of_element;
+    
+    size_t addr_alignment = (buffer_capacity % sizeof(char*));
+    buffer_capacity += addr_alignment != 0 ? sizeof(char*) - addr_alignment : 0;
 
-    if (__pool_loc > sizeof(__buff__))
+    if (buffer_capacity> sizeof(buffer))
     {
       throw chunkalloc_out_of_mem();
     }
@@ -78,17 +142,17 @@ public:
   ChunkAllocator() throw() : std::allocator<T>()
   {
     // alloc from main-buffer
-    __pool_loc = 0;
-    memset( &__buff__[0], 0, sizeof(__buff__));
-    __pool = &__buff__[0];
+    buffer_capacity = 0;
+    memset( &buffer[0], 0, sizeof(buffer));
+    buffer_ptr = &buffer[0];
   }
 
   //==================================
   ChunkAllocator(const ChunkAllocator& other) throw() : std::allocator<T>(other)
   {
     // copy const
-    __pool_loc = 0;
-    __pool = &__buff__[0];
+    buffer_capacity = 0;
+    buffer_ptr = &buffer[0];
   }
 
   //==================================
@@ -205,29 +269,14 @@ public:
   }
 };
 
-class __clt_allocator
-{
-public:
-  s3select_allocator* m_s3select_allocator;
-
-public:
-
-  __clt_allocator():m_s3select_allocator(0) {}
-
-  void set(s3select_allocator* a)
-  {
-    m_s3select_allocator = a;
-  }
-};
-
 // placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
 #define S3SELECT_NEW( type , ... ) [=]() \
         {   \
-            m_s3select_allocator->check_capacity(sizeof( type )); \
-            m_s3select_allocator->set_global_buff(); \
+            S3C::inst()->getAllocator()->check_capacity(sizeof( type )); \
+            S3C::inst()->getAllocator()->set_global_buff(); \
             auto res=new (_s3select_buff_ptr) type(__VA_ARGS__); \
-            m_s3select_allocator->inc(sizeof( type )); \
-            m_s3select_allocator->zero(); \
+            S3C::inst()->getAllocator()->inc(sizeof( type )); \
+            S3C::inst()->getAllocator()->zero(); \
             return res; \
         }();
 
@@ -894,7 +943,7 @@ public:
 
   virtual ~base_statement() {}
 
-  void __call_destructor()
+  void dtor()
   {
     this->~base_statement();
   }
@@ -1132,7 +1181,7 @@ private:
 
   cmp_t _cmp;
   value var_value;
-  bool negation_result;//false: dont negate ; upon NOT operator(unary)
+  bool negation_result;//false: dont negate ; upon NOT operator(unary) its true
   
 public:
 
@@ -1219,7 +1268,7 @@ private:
 
   oplog_t _oplog;
   value var_value;
-  bool negation_result;//false: dont negate ; upon NOT operator(unary)
+  bool negation_result;//false: dont negate ; upon NOT operator(unary) its true
 
 public:
 
@@ -1430,7 +1479,7 @@ public:
 
   virtual ~base_function() {}
   
-  virtual void __call_destructor()
+  virtual void dtor()
   {//release function-body implementation 
     this->~base_function();
   }

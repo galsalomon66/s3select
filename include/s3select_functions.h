@@ -43,7 +43,7 @@ enum class s3select_func_En_t {ADD,
                               };
 
 
-class s3select_functions : public __clt_allocator
+class s3select_functions
 {
 
 private:
@@ -185,9 +185,9 @@ public:
     {
       if (d->is_function())
       {
-        dynamic_cast<__function*>(d)->impl()->__call_destructor();
+        dynamic_cast<__function*>(d)->impl()->dtor();
       }
-      d->__call_destructor();
+      d->dtor();
     }
 
   }

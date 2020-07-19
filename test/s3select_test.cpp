@@ -372,7 +372,7 @@ TEST(TestS3selectOperator, pow)
 
 TEST(TestS3selectOperator, not_operator)
 {
-    const std::string input_query = "select \"true\" from stdin not ( (1+4) == 2 ) and (not(1 > (5*6)));" ;
+    const std::string input_query = "select \"true\" from stdin where not ( (1+4) == 2 ) and (not(1 > (5*6)));" ;
 	  auto s3select_res = run_s3select(input_query);
     ASSERT_EQ(s3select_res, std::string("true"));
 }

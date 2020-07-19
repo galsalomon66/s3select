@@ -7,24 +7,6 @@
 using namespace s3selectEngine;
 using namespace BOOST_SPIRIT_CLASSIC_NS;
 
-int cli_get_schema(const char *input_schema, actionQ &x)
-{
-    g_push_column.set_action_q(&x);
-
-    rule<> column_name_rule = lexeme_d[(+alpha_p >> *digit_p)];
-
-    //TODO an issue to resolve with trailing space
-    parse_info<> info = parse(input_schema, ((column_name_rule)[BOOST_BIND_ACTION(push_column)] >> *(',' >> (column_name_rule)[BOOST_BIND_ACTION(push_column)])), space_p);
-
-    if (!info.full)
-    {
-        std::cout << "failure in schema description " << input_schema << std::endl;
-        return -1;
-    }
-
-    return 0;
-}
-
 int main(int argc,char **argv)
 {
 
