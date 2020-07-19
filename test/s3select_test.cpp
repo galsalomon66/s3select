@@ -429,3 +429,64 @@ TEST(TestS3SElect, from_invalid_object)
     ASSERT_EQ(s3select_res, "");
 }
 
+TEST(TestS3selectFunctions, avg)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select avg(int(_1)) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string("63.5,"));
+}
+
+TEST(TestS3selectFunctions, avgzero)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select avg(int(_1)) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 0;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, -1);
+    ASSERT_EQ(s3select_result, std::string(""));
+}
+
+TEST(TestS3selectFunctions, floatavg)
+{
+    s3select s3select_syntax;
+    const std::string input_query = "select avg(float(_1)) from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string("63.5,"));
+}
+
+

@@ -29,6 +29,7 @@ static push_4dig g_push_4dig;
 
 enum class s3select_func_En_t {ADD,
                                SUM,
+                               AVG,
                                MIN,
                                MAX,
                                COUNT,
@@ -55,6 +56,7 @@ private:
   {
     {"add", s3select_func_En_t::ADD},
     {"sum", s3select_func_En_t::SUM},
+    {"avg", s3select_func_En_t::AVG},
     {"count", s3select_func_En_t::COUNT},
     {"min", s3select_func_En_t::MIN},
     {"max", s3select_func_En_t::MAX},
@@ -274,6 +276,42 @@ struct _fn_count : public base_function
     result->set_value(count);
   }
 
+};
+
+struct _fn_avg : public base_function
+{
+
+    value sum;
+    value count{0.0};
+
+    _fn_avg() : sum(0) { aggregate = true; }
+
+    bool operator()(bs_stmt_vec_t* args, variable *result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement *x = *iter;
+
+        try
+        {
+            sum = sum + x->eval();
+            count++;
+        }
+        catch (base_s3select_exception &e)
+        {
+            throw base_s3select_exception(e.what());
+        }
+
+        return true;
+    }
+
+    virtual void get_aggregate_result(variable *result)
+    {
+        if(count == 0) {
+            throw base_s3select_exception("count cannot be zero!");
+        } else {
+            *result = sum/count ;
+        }
+    }
 };
 
 struct _fn_min : public base_function
@@ -895,6 +933,10 @@ base_function* s3select_functions::create(std::string fn_name)
 
   case s3select_func_En_t::UTCNOW:
     return S3SELECT_NEW(_fn_utcnow);
+    break;
+
+  case s3select_func_En_t::AVG:
+    return S3SELECT_NEW(_fn_avg);
     break;
 
   default:
