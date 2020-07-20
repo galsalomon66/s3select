@@ -371,6 +371,10 @@ struct binop_div
 {
   double operator()(double a, double b)
   {
+    if(b == 0)
+    {
+      throw base_s3select_exception("division by zero is not allowed");
+    }
     return a / b;
   }
 };
@@ -380,6 +384,19 @@ struct binop_pow
   double operator()(double a, double b)
   {
     return pow(a, b);
+  }
+};
+
+struct binop_modulo
+{
+  int64_t operator()(int64_t a, int64_t b)
+  {
+    if (b == 0)
+    {
+      throw base_s3select_exception("Mod zero is not allowed");
+    } else {
+      return a % b;
+    }
   }
 };
 
@@ -790,6 +807,14 @@ public:
     return compute<binop_pow>(*this, v);
   }
 
+  value & operator%(const value &v)
+  {
+    if(v.type == value_En_t::DECIMAL) {
+      return compute<binop_modulo>(*this,v);
+    } else {
+      throw base_s3select_exception("wrong use of modulo operation!");
+    }
+  }
 };
 
 class base_statement
@@ -1292,7 +1317,7 @@ class mulldiv_operation : public base_statement
 
 public:
 
-  enum class muldiv_t {NA, MULL, DIV, POW} ;
+  enum class muldiv_t {NA, MULL, DIV, POW,MOD} ;
 
 private:
   base_statement* l;
@@ -1338,6 +1363,10 @@ public:
 
     case muldiv_t::POW:
       return var_value = l->eval() ^ r->eval();
+      break;
+
+    case muldiv_t::MOD:
+      return var_value = l->eval() % r->eval();
       break;
 
     default:

@@ -204,9 +204,13 @@ struct push_mulop : public base_action
     {
       m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::DIV);
     }
-    else
+    else if(token.compare("^") == 0)
     {
       m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::POW);
+    }
+    else
+    {
+      m_action->muldivQ.push_back(mulldiv_operation::muldiv_t::MOD);
     }
   }
 };
@@ -770,7 +774,7 @@ public:
 
       column_pos = ('_'>>+(bsc::digit_p) ) | '*' ;
 
-      muldiv_operator = bsc::str_p("*") | bsc::str_p("/") | bsc::str_p("^");// got precedense
+      muldiv_operator = bsc::str_p("*") | bsc::str_p("/") | bsc::str_p("^") | bsc::str_p("%");// got precedense
 
       addsubop_operator = bsc::str_p("+") | bsc::str_p("-");
 
