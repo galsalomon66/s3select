@@ -40,7 +40,8 @@ enum class s3select_func_En_t {ADD,
                                EXTRACT,
                                DATE_ADD,
                                DATE_DIFF,
-                               UTCNOW
+                               UTCNOW,
+                               LENGTH
                               };
 
 
@@ -67,7 +68,9 @@ private:
     {"extract", s3select_func_En_t::EXTRACT},
     {"dateadd", s3select_func_En_t::DATE_ADD},
     {"datediff", s3select_func_En_t::DATE_DIFF},
-    {"utcnow", s3select_func_En_t::UTCNOW}
+    {"utcnow", s3select_func_En_t::UTCNOW},
+    {"charlength", s3select_func_En_t::LENGTH},
+    {"characterlength", s3select_func_En_t::LENGTH}
   };
 
 public:
@@ -80,6 +83,7 @@ public:
   }
 
   void clean();
+
 };
 
 class __function : public base_statement
@@ -870,6 +874,25 @@ struct _fn_substr : public base_function
 
 };
 
+struct _fn_charlength : public base_function {
+
+    value v_str;
+ 
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement* str =  *iter;
+        v_str = str->eval();
+        if(v_str.type != value::value_En_t::STRING) {
+            throw base_s3select_exception("content is not string!");
+        } else {
+            int64_t str_length = strlen(v_str.str());
+            result->set_value(str_length);         
+            return true; 
+            }
+        }
+    };
+
 base_function* s3select_functions::create(std::string fn_name)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
@@ -938,6 +961,10 @@ base_function* s3select_functions::create(std::string fn_name)
   case s3select_func_En_t::AVG:
     return S3SELECT_NEW(_fn_avg);
     break;
+
+  case s3select_func_En_t::LENGTH:
+    return S3SELECT_NEW(_fn_charlength);
+    break; 
 
   default:
     throw base_s3select_exception("internal error while resolving function-name");
