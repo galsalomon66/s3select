@@ -39,7 +39,8 @@ enum class s3select_func_En_t {ADD,
                                EXTRACT,
                                DATE_ADD,
                                DATE_DIFF,
-                               UTCNOW
+                               UTCNOW,
+			       VERSION
                               };
 
 
@@ -65,7 +66,8 @@ private:
     {"extract", s3select_func_En_t::EXTRACT},
     {"dateadd", s3select_func_En_t::DATE_ADD},
     {"datediff", s3select_func_En_t::DATE_DIFF},
-    {"utcnow", s3select_func_En_t::UTCNOW}
+    {"utcnow", s3select_func_En_t::UTCNOW},
+    {"version", s3select_func_En_t::VERSION}
   };
 
 public:
@@ -723,6 +725,20 @@ struct _fn_utcnow : public base_function
   }
 };
 
+static char s3select_ver[10]="41.a";
+
+struct _fn_version : public base_function
+{
+  value val; //TODO use git to generate sha1
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    val = &s3select_ver[0];
+    *result = val;
+    return true; 
+  }
+};
+
+
 struct _fn_substr : public base_function
 {
 
@@ -895,6 +911,10 @@ base_function* s3select_functions::create(std::string fn_name)
 
   case s3select_func_En_t::UTCNOW:
     return S3SELECT_NEW(_fn_utcnow);
+    break;
+
+  case s3select_func_En_t::VERSION:
+    return S3SELECT_NEW(_fn_version);
     break;
 
   default:
