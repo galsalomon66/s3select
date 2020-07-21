@@ -14,7 +14,7 @@
 #include <boost/bind.hpp>
 #include <functional>
 
-
+//just pushing(shaman) #1
 #define _DEBUG_TERM {string  token(a,b);std::cout << __FUNCTION__ << token << std::endl;}
 
 
