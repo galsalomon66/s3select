@@ -205,29 +205,14 @@ public:
   }
 };
 
-class __clt_allocator
-{
-public:
-  s3select_allocator* m_s3select_allocator;
-
-public:
-
-  __clt_allocator():m_s3select_allocator(0) {}
-
-  void set(s3select_allocator* a)
-  {
-    m_s3select_allocator = a;
-  }
-};
-
 // placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
-#define S3SELECT_NEW( type , ... ) [=]() \
+#define S3SELECT_NEW(self, type , ... ) [=]() \
         {   \
-            m_s3select_allocator->check_capacity(sizeof( type )); \
-            m_s3select_allocator->set_global_buff(); \
+            self->getAllocator()->check_capacity(sizeof( type )); \
+            self->getAllocator()->set_global_buff(); \
             auto res=new (_s3select_buff_ptr) type(__VA_ARGS__); \
-            m_s3select_allocator->inc(sizeof( type )); \
-            m_s3select_allocator->zero(); \
+            self->getAllocator()->inc(sizeof( type )); \
+            self->getAllocator()->zero(); \
             return res; \
         }();
 
