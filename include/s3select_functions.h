@@ -45,17 +45,19 @@ enum class s3select_func_En_t {ADD,
                                UTCNOW,
                                LENGTH,
                                LOWER,
-                               UPPER
+                               UPPER,
+			       VERSION
                               };
 
 
-class s3select_functions : public __clt_allocator
+class s3select_functions
 {
 
 private:
 
   using FunctionLibrary = std::map<std::string, s3select_func_En_t>;
   std::list<base_statement*> __all_query_functions;
+  s3select_allocator* m_s3select_allocator;
 
   const FunctionLibrary m_functions_library =
   {
@@ -76,16 +78,31 @@ private:
     {"charlength", s3select_func_En_t::LENGTH},
     {"characterlength", s3select_func_En_t::LENGTH},
     {"lower", s3select_func_En_t::LOWER},
-    {"upper", s3select_func_En_t::UPPER}
+    {"upper", s3select_func_En_t::UPPER},
+    {"version", s3select_func_En_t::VERSION}
   };
 
 public:
 
   base_function* create(std::string fn_name);
 
+  s3select_functions():m_s3select_allocator(0)
+  {
+  }
+
   void push_for_cleanup(base_statement* f)
   {
     __all_query_functions.push_back(f);
+  }
+
+  void setAllocator(s3select_allocator* alloc)
+  {
+    m_s3select_allocator = alloc;
+  }
+
+  s3select_allocator* getAllocator()
+  {
+    return m_s3select_allocator;
   }
 
   void clean();
@@ -771,6 +788,20 @@ struct _fn_utcnow : public base_function
   }
 };
 
+static char s3select_ver[10]="41.a";
+
+struct _fn_version : public base_function
+{
+  value val; //TODO use git to generate sha1
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    val = &s3select_ver[0];
+    *result = val;
+    return true; 
+  }
+};
+
+
 struct _fn_substr : public base_function
 {
 
@@ -955,71 +986,76 @@ base_function* s3select_functions::create(std::string fn_name)
   switch (iter->second)
   {
   case s3select_func_En_t::ADD:
-    return S3SELECT_NEW(_fn_add);
+    return S3SELECT_NEW(this,_fn_add);
     break;
 
   case s3select_func_En_t::SUM:
-    return S3SELECT_NEW(_fn_sum);
+    return S3SELECT_NEW(this,_fn_sum);
     break;
 
   case s3select_func_En_t::COUNT:
-    return S3SELECT_NEW(_fn_count);
+    return S3SELECT_NEW(this,_fn_count);
     break;
 
   case s3select_func_En_t::MIN:
-    return S3SELECT_NEW(_fn_min);
+    return S3SELECT_NEW(this,_fn_min);
     break;
 
   case s3select_func_En_t::MAX:
-    return S3SELECT_NEW(_fn_max);
+    return S3SELECT_NEW(this,_fn_max);
     break;
 
   case s3select_func_En_t::TO_INT:
-    return S3SELECT_NEW(_fn_to_int);
+    return S3SELECT_NEW(this,_fn_to_int);
     break;
 
   case s3select_func_En_t::TO_FLOAT:
-    return S3SELECT_NEW(_fn_to_float);
+    return S3SELECT_NEW(this,_fn_to_float);
     break;
 
   case s3select_func_En_t::SUBSTR:
-    return S3SELECT_NEW(_fn_substr);
+    return S3SELECT_NEW(this,_fn_substr);
     break;
 
   case s3select_func_En_t::TO_TIMESTAMP:
-    return S3SELECT_NEW(_fn_to_timestamp);
+    return S3SELECT_NEW(this,_fn_to_timestamp);
     break;
 
   case s3select_func_En_t::EXTRACT:
-    return S3SELECT_NEW(_fn_extact_from_timestamp);
+    return S3SELECT_NEW(this,_fn_extact_from_timestamp);
     break;
 
   case s3select_func_En_t::DATE_ADD:
-    return S3SELECT_NEW(_fn_add_to_timestamp);
+    return S3SELECT_NEW(this,_fn_add_to_timestamp);
     break;
 
   case s3select_func_En_t::DATE_DIFF:
-    return S3SELECT_NEW(_fn_diff_timestamp);
+    return S3SELECT_NEW(this,_fn_diff_timestamp);
     break;
 
   case s3select_func_En_t::UTCNOW:
-    return S3SELECT_NEW(_fn_utcnow);
+    return S3SELECT_NEW(this,_fn_utcnow);
     break;
 
   case s3select_func_En_t::AVG:
-    return S3SELECT_NEW(_fn_avg);
+    return S3SELECT_NEW(this,_fn_avg);
+    break;
 
   case s3select_func_En_t::LOWER:
-    return S3SELECT_NEW(_fn_lower);
+    return S3SELECT_NEW(this,_fn_lower);
     break;
 
   case s3select_func_En_t::UPPER:
-    return S3SELECT_NEW(_fn_upper);
+    return S3SELECT_NEW(this,_fn_upper);
     break;
 
   case s3select_func_En_t::LENGTH:
-    return S3SELECT_NEW(_fn_charlength);
+    return S3SELECT_NEW(this,_fn_charlength);
     break; 
+
+  case s3select_func_En_t::VERSION:
+    return S3SELECT_NEW(this,_fn_version);
+    break;
 
   default:
     throw base_s3select_exception("internal error while resolving function-name");

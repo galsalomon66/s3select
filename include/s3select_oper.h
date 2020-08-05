@@ -147,8 +147,6 @@ public:
 };
 
 
-// pointer to dynamic allocated buffer , which used for placement new.
-static __thread char* _s3select_buff_ptr =0;
 
 class s3select_allocator //s3select is the "owner"
 {
@@ -157,19 +155,7 @@ private:
   std::vector<char*> list_of_buff;
   u_int32_t m_idx;
 
-public:
 #define __S3_ALLOCATION_BUFF__ (8*1024)
-  s3select_allocator():m_idx(0)
-  {
-    list_of_buff.push_back((char*)malloc(__S3_ALLOCATION_BUFF__));
-  }
-
-  void set_global_buff()
-  {
-    char* buff = list_of_buff.back();
-    _s3select_buff_ptr = &buff[ m_idx ];
-  }
-
   void check_capacity(size_t sz)
   {
     if (sz>__S3_ALLOCATION_BUFF__)
@@ -190,10 +176,23 @@ public:
     m_idx += sizeof(char*) - (m_idx % sizeof(char*)); //alignment
   }
 
-  void zero()
+public:
+  s3select_allocator():m_idx(0)
   {
-    //not a must, its for safty.
-    _s3select_buff_ptr=0;
+    list_of_buff.push_back((char*)malloc(__S3_ALLOCATION_BUFF__));
+  }
+
+  void *alloc(size_t sz)
+  {
+    check_capacity(sz);
+
+    char* buff = list_of_buff.back();
+
+    u_int32_t idx = m_idx;
+   
+    inc(sz);
+ 
+    return &buff[ idx ];
   }
 
   virtual ~s3select_allocator()
@@ -205,29 +204,10 @@ public:
   }
 };
 
-class __clt_allocator
-{
-public:
-  s3select_allocator* m_s3select_allocator;
-
-public:
-
-  __clt_allocator():m_s3select_allocator(0) {}
-
-  void set(s3select_allocator* a)
-  {
-    m_s3select_allocator = a;
-  }
-};
-
 // placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
-#define S3SELECT_NEW( type , ... ) [=]() \
+#define S3SELECT_NEW(self, type , ... ) [=]() \
         {   \
-            m_s3select_allocator->check_capacity(sizeof( type )); \
-            m_s3select_allocator->set_global_buff(); \
-            auto res=new (_s3select_buff_ptr) type(__VA_ARGS__); \
-            m_s3select_allocator->inc(sizeof( type )); \
-            m_s3select_allocator->zero(); \
+            auto res=new (self->getAllocator()->alloc(sizeof(type))) type(__VA_ARGS__); \
             return res; \
         }();
 
