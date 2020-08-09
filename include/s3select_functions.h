@@ -46,7 +46,8 @@ enum class s3select_func_En_t {ADD,
                                LENGTH,
                                LOWER,
                                UPPER,
-			       VERSION
+                               BETWEEN,
+                               VERSION
                               };
 
 
@@ -79,6 +80,7 @@ private:
     {"characterlength", s3select_func_En_t::LENGTH},
     {"lower", s3select_func_En_t::LOWER},
     {"upper", s3select_func_En_t::UPPER},
+    {"between", s3select_func_En_t::BETWEEN},
     {"version", s3select_func_En_t::VERSION}
   };
 
@@ -788,6 +790,47 @@ struct _fn_utcnow : public base_function
   }
 };
 
+struct _fn_between : public base_function
+{
+
+  value res;
+  
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    int args_size = args->size();
+
+
+    if (args_size != 3)
+    {
+      throw base_s3select_exception("between operates on 3 expressions");//TODO FATAL
+    }
+
+    bs_stmt_vec_t::iterator iter = args->begin();
+
+    base_statement* second_expr = *iter;
+    iter++;    
+    base_statement* first_expr = *iter;
+    iter++;    
+    base_statement* main_expr = *iter;
+
+    //TODO types validations 
+    value second_expr_val = second_expr->eval();
+    value first_expr_val = first_expr->eval();
+    value main_expr_val = main_expr->eval();
+
+    if((main_expr_val > first_expr_val) && (main_expr_val < second_expr_val))
+    {
+      result->set_value((int64_t)true);
+    }
+    else
+    {
+      result->set_value((int64_t)false);
+    }
+
+    return true;
+  }
+};
+
 static char s3select_ver[10]="41.a";
 
 struct _fn_version : public base_function
@@ -1051,6 +1094,10 @@ base_function* s3select_functions::create(std::string fn_name)
 
   case s3select_func_En_t::LENGTH:
     return S3SELECT_NEW(this,_fn_charlength);
+    break; 
+
+  case s3select_func_En_t::BETWEEN:
+    return S3SELECT_NEW(this,_fn_between);
     break; 
 
   case s3select_func_En_t::VERSION:

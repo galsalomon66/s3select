@@ -250,6 +250,15 @@ TEST(TestS3selectFunctions, add)
     ASSERT_EQ(s3select_res, std::string("-4.5"));
 }
 
+void generate_rand_csv(std::string& out, size_t size) {
+  // schema is: int, float, string, string
+  std::stringstream ss;
+  for (auto i = 0U; i < size; ++i) {
+    ss << rand()%1000 << "," << rand()%1000 << "," << rand()%1000 << "," << "foo"+std::to_string(i) << "," << std::to_string(i)+"bar" << std::endl;
+  }
+  out = ss.str();
+}
+
 void generate_csv(std::string& out, size_t size) {
   // schema is: int, float, string, string
   std::stringstream ss;
@@ -277,6 +286,47 @@ TEST(TestS3selectFunctions, sum)
         ); 
     ASSERT_EQ(status, 0);
     ASSERT_EQ(s3select_result, std::string("8128,812.80000000000007,"));
+}
+
+TEST(TestS3selectFunctions, between)
+{	
+    //purpose: test different filter but with the same results 
+    s3select s3select_syntax;
+    s3select s3select_syntax_no_between;
+
+    const std::string input_query = "select count(0) from stdin where int(_1) between int(_2) and int(_3) ;";
+    const std::string input_query_no_between = "select count(0) from stdin where int(_1) > int(_2) and int(_1) < int(_3) ;";
+
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    status = s3select_syntax_no_between.parse_query(input_query_no_between.c_str());
+    ASSERT_EQ(status, 0);
+
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    s3selectEngine::csv_object s3_csv_object_no_between(&s3select_syntax_no_between);
+
+    std::string s3select_result;
+    std::string s3select_result_no_between;
+    std::string input;
+    std::string input_no_bwtween;
+    size_t size = 128;
+    generate_rand_csv(input, size);
+    input_no_bwtween = input;
+
+    status = s3_csv_object_no_between.run_s3select_on_object(s3select_result_no_between, input_no_bwtween.c_str(), input_no_bwtween.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, s3select_result_no_between);
 }
 
 TEST(TestS3selectFunctions, count)

@@ -199,6 +199,12 @@ struct push_alias_projection
 };
 static push_alias_projection g_push_alias_projection;
 
+struct push_between_filter
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_between_filter g_push_between_filter;
+
 struct push_debug_1
 {
   void operator()(s3select* self, const char* a, const char* b) const;
@@ -406,7 +412,9 @@ public:
 
       binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
 
-      arithmetic_predicate = (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+      arithmetic_predicate = (between_predicate) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+
+      between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
 
       factor = (arithmetic_expression) | ('(' >> condition_expression >> ')') ;
 
@@ -445,7 +453,7 @@ public:
     }
 
 
-    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
+    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor,between_predicate;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
@@ -732,6 +740,11 @@ void push_negation::operator()(s3select* self, const char* a, const char* b) con
     logical_operand* f = S3SELECT_NEW(self, logical_operand, pred);
     self->getAction()->condQ.push_back(f);
   }
+  else if (dynamic_cast<__function*>(pred) || dynamic_cast<negate_function_operation*>(pred))
+  {
+    negate_function_operation* nf = S3SELECT_NEW(self, negate_function_operation, pred);
+    self->getAction()->condQ.push_back(nf);
+  }
   else
   {
     arithmetic_operand* f = S3SELECT_NEW(self, arithmetic_operand, pred);
@@ -783,6 +796,29 @@ void push_alias_projection::operator()(s3select* self, const char* a, const char
 
   self->getAction()->projections.get()->push_back(bs);
   self->getAction()->exprQ.pop_back();
+}
+
+void push_between_filter::operator()(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string between_function("between");
+
+  __function* func = S3SELECT_NEW(self, __function, between_function.c_str(), self->getS3F());
+
+  base_statement* second_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(second_expr);
+
+  base_statement* first_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(first_expr);
+
+  base_statement* main_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(main_expr);
+
+  self->getAction()->condQ.push_back(func);
 }
 
 void push_debug_1::operator()(s3select* self, const char* a, const char* b) const
