@@ -68,6 +68,9 @@ struct actionQ
   std::string from_clause;
   std::vector<std::string> schema_columns;
   s3select_projections  projections;
+  uint64_t in_set_count;
+
+  actionQ():in_set_count(0){}
 
 };
 
@@ -204,6 +207,18 @@ struct push_between_filter
   void operator()(s3select* self, const char* a, const char* b) const;
 };
 static push_between_filter g_push_between_filter;
+
+struct push_in_predicate
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate g_push_in_predicate;
+
+struct push_count_expr
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_count_expr g_push_count_expr;
 
 struct push_debug_1
 {
@@ -412,9 +427,11 @@ public:
 
       binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
 
-      arithmetic_predicate = (between_predicate) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+      arithmetic_predicate = (between_predicate) | (in_predicate) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
 
       between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
+
+      in_predicate = (arithmetic_expression[BOOST_BIND_ACTION(push_count_expr)] >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_count_expr)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_count_expr)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
 
       factor = (arithmetic_expression) | ('(' >> condition_expression >> ')') ;
 
@@ -453,7 +470,8 @@ public:
     }
 
 
-    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor,between_predicate;
+    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
+    bsc::rule<ScannerT> between_predicate, in_predicate;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
@@ -817,6 +835,37 @@ void push_between_filter::operator()(s3select* self, const char* a, const char* 
   base_statement* main_expr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
   func->push_argument(main_expr);
+
+  self->getAction()->condQ.push_back(func);
+}
+
+void push_count_expr::operator()(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  self->getAction()->in_set_count ++;
+
+}
+
+void push_in_predicate::operator()(s3select* self, const char* a, const char* b) const
+{
+  // expr in (e1,e2,e3 ...)
+  std::string token(a, b);
+
+  std::string in_function("in_predicate");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  while(self->getAction()->in_set_count)
+  {
+    base_statement* ei = self->getAction()->exprQ.back();
+
+    func->push_argument(ei);
+
+    self->getAction()->exprQ.pop_back();
+
+    self->getAction()->in_set_count --;
+  }
 
   self->getAction()->condQ.push_back(func);
 }
