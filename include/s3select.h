@@ -220,6 +220,12 @@ struct push_count_expr
 };
 static push_count_expr g_push_count_expr;
 
+struct push_like_predicate
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_like_predicate g_push_like_predicate;
+
 struct push_debug_1
 {
   void operator()(s3select* self, const char* a, const char* b) const;
@@ -427,11 +433,15 @@ public:
 
       binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
 
-      arithmetic_predicate = (between_predicate) | (in_predicate) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+      arithmetic_predicate = (special_predicates) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+
+      special_predicates = (between_predicate) | (in_predicate) | (like_predicate);
 
       between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
 
       in_predicate = (arithmetic_expression[BOOST_BIND_ACTION(push_count_expr)] >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_count_expr)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_count_expr)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
+
+      like_predicate = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate)];
 
       factor = (arithmetic_expression) | ('(' >> condition_expression >> ')') ;
 
@@ -471,7 +481,7 @@ public:
 
 
     bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
-    bsc::rule<ScannerT> between_predicate, in_predicate;
+    bsc::rule<ScannerT> special_predicates,between_predicate, in_predicate, like_predicate;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
@@ -836,6 +846,8 @@ void push_between_filter::operator()(s3select* self, const char* a, const char* 
   self->getAction()->exprQ.pop_back();
   func->push_argument(main_expr);
 
+  self->getAction()->in_set_count = 0; //TODO is it correct for all cases.
+
   self->getAction()->condQ.push_back(func);
 }
 
@@ -866,6 +878,21 @@ void push_in_predicate::operator()(s3select* self, const char* a, const char* b)
 
     self->getAction()->in_set_count --;
   }
+
+  self->getAction()->condQ.push_back(func);
+}
+
+void push_like_predicate::operator()(s3select* self, const char* a, const char* b) const
+{
+  // expr like expr ; both should be string, the second expression could be compiled at the
+  // time AST is build, which will improve performance much.
+
+  std::string token(a, b);
+  std::string in_function("like_predicate");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  self->getAction()->in_set_count = 0; //TODO is it correct for all cases.
 
   self->getAction()->condQ.push_back(func);
 }
