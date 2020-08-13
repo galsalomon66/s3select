@@ -226,6 +226,12 @@ struct push_like_predicate
 };
 static push_like_predicate g_push_like_predicate;
 
+struct push_is_null_predicate
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_is_null_predicate g_push_is_null_predicate;
+
 struct push_debug_1
 {
   void operator()(s3select* self, const char* a, const char* b) const;
@@ -435,7 +441,9 @@ public:
 
       arithmetic_predicate = (special_predicates) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
 
-      special_predicates = (between_predicate) | (in_predicate) | (like_predicate);
+      special_predicates = (is_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
+
+      is_null = (arithmetic_expression >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
 
       between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
 
@@ -481,7 +489,7 @@ public:
 
 
     bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
-    bsc::rule<ScannerT> special_predicates,between_predicate, in_predicate, like_predicate;
+    bsc::rule<ScannerT> special_predicates,between_predicate, in_predicate, like_predicate, is_null, is_not_null;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
@@ -889,6 +897,20 @@ void push_like_predicate::operator()(s3select* self, const char* a, const char* 
 
   std::string token(a, b);
   std::string in_function("like_predicate");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  self->getAction()->in_set_count = 0; //TODO is it correct for all cases.
+
+  self->getAction()->condQ.push_back(func);
+}
+
+void push_is_null_predicate::operator()(s3select* self, const char* a, const char* b) const
+{
+    //expression is null 
+    std::string token(a, b);
+      
+    std::string in_function("is_null");
 
   __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
 
