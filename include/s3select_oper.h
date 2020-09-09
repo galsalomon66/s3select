@@ -277,6 +277,44 @@ public:
   }
 };
 
+class s3select_reserved_word
+{
+  public:
+
+  enum class reserve_word_en_t
+  {
+    NA,
+    S3S_NULL,//TODO check AWS defintions for reserve words, its a long list , what about functions-names? 
+    S3S_NAN 
+  } ;
+
+  using reserved_words = std::map<std::string,reserve_word_en_t>;
+
+  const reserved_words m_reserved_words=
+  {
+    {"null",reserve_word_en_t::S3S_NULL},{"NULL",reserve_word_en_t::S3S_NULL},
+    {"nan",reserve_word_en_t::S3S_NAN},{"NaN",reserve_word_en_t::S3S_NAN}
+  };
+
+  bool is_reserved_word(std::string & token)
+  {
+    return m_reserved_words.find(token) != m_reserved_words.end() ;
+  }
+
+  reserve_word_en_t get_reserved_word(std::string & token)
+  {
+    if (is_reserved_word(token)==true)
+    {
+      return m_reserved_words.find(token)->second;
+    }
+    else
+    {
+      return reserve_word_en_t::NA;
+    }
+  }
+
+};
+
 class base_statement;
 class projection_alias
 {
@@ -327,7 +365,7 @@ struct binop_plus
 {
   double operator()(double a, double b)
   {
-    return a+b;
+    return a + b;
   }
 };
 
@@ -335,7 +373,7 @@ struct binop_minus
 {
   double operator()(double a, double b)
   {
-    return a-b;
+    return a - b;
   }
 };
 
@@ -345,17 +383,21 @@ struct binop_mult
   {
     return a * b;
   }
-};
+};   
 
 struct binop_div
 {
   double operator()(double a, double b)
   {
-    if(b == 0)
-    {
-      throw base_s3select_exception("division by zero is not allowed");
+    if (b == 0) {
+      if( isnan(a)) {
+        return a;
+      } else {
+        throw base_s3select_exception("division by zero is not allowed");
+      } 
+    } else {
+      return a / b;
     }
-    return a / b;
   }
 };
 
@@ -406,6 +448,8 @@ public:
     FLOAT,
     STRING,
     TIMESTAMP,
+    S3NULL,
+    S3NAN,
     NA
   } ;
   value_En_t type;
@@ -461,6 +505,29 @@ public:
     return type == value_En_t::TIMESTAMP;
   }
 
+  bool is_null() const
+  {
+    return type == value_En_t::S3NULL;
+  }
+
+  bool is_nan() const
+  {
+    if (type == value_En_t::FLOAT) {
+      return std::isnan(this->__val.dbl);
+    }
+    return type == value_En_t::S3NAN; 
+  }
+
+  void set_nan() 
+  {
+    __val.dbl = NAN;
+    type = value_En_t::FLOAT;
+  }
+
+  void setnull()
+  {
+    type = value_En_t::S3NULL;
+  }
 
   std::string to_string()  //TODO very intensive , must improve this
   {
@@ -478,6 +545,10 @@ public:
       else if (type == value_En_t::TIMESTAMP)
       {
         m_to_string =  to_simple_string( *__val.timestamp );
+      }
+      else if (type == value_En_t::S3NULL)
+      {
+        m_to_string.assign("null");
       }
     }
     else
@@ -568,7 +639,7 @@ public:
   }
 
   bool operator<(const value& v)//basic compare operator , most itensive runtime operation
-  {
+  { 
     //TODO NA possible?
     if (is_string() && v.is_string())
     {
@@ -606,6 +677,11 @@ public:
     if(is_timestamp() && v.is_timestamp())
     {
       return *timestamp() < *(v.timestamp());
+    }
+
+    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    {
+      return false;
     }
 
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
@@ -650,6 +726,11 @@ public:
     if(is_timestamp() && v.is_timestamp())
     {
       return *timestamp() > *(v.timestamp());
+    }
+
+    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    {
+      return false;
     }
 
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
@@ -697,21 +778,40 @@ public:
       return *timestamp() == *(v.timestamp());
     }
 
+    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    {
+      return false;
+    }
+
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
   }
   bool operator<=(const value& v)
   {
-    return !(*this>v);
+    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+      return false;
+    } else {
+      return !(*this>v);
+    } 
   }
+  
   bool operator>=(const value& v)
   {
-    return !(*this<v);
+    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+      return false;
+    } else {
+      return !(*this<v);
+    } 
   }
+  
   bool operator!=(const value& v)
   {
-    return !(*this == v);
+    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+      return true;
+    } else {
+      return !(*this == v);
+      } 
   }
-
+  
   template<typename binop> //conversion rules for arithmetical binary operations
   value& compute(value& l, const value& r) //left should be this, it contain the result
   {
@@ -721,8 +821,9 @@ public:
     {
       throw base_s3select_exception("illegal binary operation with string");
     }
-
-    if (l.type != r.type)
+    if (l.is_number() && r.is_number())
+    {
+      if (l.type != r.type)
     {
       //conversion
 
@@ -752,6 +853,13 @@ public:
         l.type = value_En_t::FLOAT;
       }
     }
+  }
+    
+    if ((l.is_null() || r.is_null()) || (l.is_nan() || r.is_nan()))
+    {
+      l.set_nan();
+      return l;
+    }
 
     return l;
   }
@@ -776,12 +884,17 @@ public:
   {
     return compute<binop_mult>(*this, v);
   }
-
-  value& operator/(const value& v)  // TODO  handle division by zero
+  
+  value& operator/(value& v)  // TODO  handle division by zero
   {
-    return compute<binop_div>(*this, v);
+    if (v.is_null() || this->is_null()) {
+      v.set_nan();
+      return v;
+    } else {
+      return compute<binop_div>(*this, v);
+    }
   }
-
+  
   value& operator^(const value& v)
   {
     return compute<binop_pow>(*this, v);
@@ -973,6 +1086,28 @@ public:
     }
   }
 
+  variable(s3select_reserved_word::reserve_word_en_t reserve_word)
+  {
+    if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_NULL)
+    {
+      m_var_type = variable::var_t::COL_VALUE;
+      column_pos = -1;
+      var_value.type = value::value_En_t::S3NULL;//TODO use set_null
+    }
+    else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_NAN)
+    {
+      m_var_type = variable::var_t::COL_VALUE;
+      column_pos = -1;
+      var_value.set_nan();
+    }
+    else 
+    {
+      _name = "#";
+      m_var_type = var_t::NA;
+      column_pos = -1;
+    }
+  }
+
   void operator=(value& v)
   {
     var_value = v;
@@ -996,6 +1131,11 @@ public:
   void set_value(boost::posix_time::ptime* p)
   {
     var_value = p;
+  }
+
+  void set_null()
+  {
+    var_value.setnull();
   }
 
   virtual ~variable() {}
@@ -1268,28 +1408,43 @@ public:
     return std::string("#");//TBD
   }
   virtual value& eval()
-  {bool res;
+  {
+    bool res;
+    if (!l || !r)
+    {
+      throw base_s3select_exception("missing operand for logical ", base_s3select_exception::s3select_exp_en_t::FATAL);
+    }
+    value a = l->eval();
     if (_oplog == oplog_t::AND)
     {
-      if (!l || !r)
+      if (a.i64() == false)
       {
-        throw base_s3select_exception("missing operand for logical and", base_s3select_exception::s3select_exp_en_t::FATAL);
+        res = false ^ negation_result;
+        return var_value = res;
+      } 
+      value b = r->eval();
+      if (a.is_null() || b.is_null()) {
+        var_value.setnull();
+      } else {
+        res =  (a.i64() && b.i64()) ^ negation_result ;
       }
-       res =  (l->eval().i64() && r->eval().i64()) ^ negation_result ;
-
     }
     else
     {
-      if (!l || !r)
+      if (a.i64() == true)
       {
-        throw base_s3select_exception("missing operand for logical or", base_s3select_exception::s3select_exp_en_t::FATAL);
+        res = true ^ negation_result;
+        return var_value = res;
       }
-       res =  (l->eval().i64() || r->eval().i64()) ^ negation_result;
+      value b = r->eval();
+      if (a.is_null() || b.is_null()) {
+        var_value.setnull();
+      } else {
+        res =  (a.i64() || b.i64()) ^ negation_result;
+      }
     }
-
     return var_value = res;
   }
-
 };
 
 class mulldiv_operation : public base_statement
