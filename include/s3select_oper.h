@@ -147,8 +147,6 @@ public:
 };
 
 
-// pointer to dynamic allocated buffer , which used for placement new.
-static __thread char* _s3select_buff_ptr =0;
 
 class s3select_allocator //s3select is the "owner"
 {
@@ -157,19 +155,7 @@ private:
   std::vector<char*> list_of_buff;
   u_int32_t m_idx;
 
-public:
 #define __S3_ALLOCATION_BUFF__ (8*1024)
-  s3select_allocator():m_idx(0)
-  {
-    list_of_buff.push_back((char*)malloc(__S3_ALLOCATION_BUFF__));
-  }
-
-  void set_global_buff()
-  {
-    char* buff = list_of_buff.back();
-    _s3select_buff_ptr = &buff[ m_idx ];
-  }
-
   void check_capacity(size_t sz)
   {
     if (sz>__S3_ALLOCATION_BUFF__)
@@ -190,10 +176,23 @@ public:
     m_idx += sizeof(char*) - (m_idx % sizeof(char*)); //alignment
   }
 
-  void zero()
+public:
+  s3select_allocator():m_idx(0)
   {
-    //not a must, its for safty.
-    _s3select_buff_ptr=0;
+    list_of_buff.push_back((char*)malloc(__S3_ALLOCATION_BUFF__));
+  }
+
+  void *alloc(size_t sz)
+  {
+    check_capacity(sz);
+
+    char* buff = list_of_buff.back();
+
+    u_int32_t idx = m_idx;
+   
+    inc(sz);
+ 
+    return &buff[ idx ];
   }
 
   virtual ~s3select_allocator()
@@ -208,11 +207,7 @@ public:
 // placement new for allocation of all s3select objects on single(or few) buffers, deallocation of those objects is by releasing the buffer.
 #define S3SELECT_NEW(self, type , ... ) [=]() \
         {   \
-            self->getAllocator()->check_capacity(sizeof( type )); \
-            self->getAllocator()->set_global_buff(); \
-            auto res=new (_s3select_buff_ptr) type(__VA_ARGS__); \
-            self->getAllocator()->inc(sizeof( type )); \
-            self->getAllocator()->zero(); \
+            auto res=new (self->getAllocator()->alloc(sizeof(type))) type(__VA_ARGS__); \
             return res; \
         }();
 
@@ -356,6 +351,10 @@ struct binop_div
 {
   double operator()(double a, double b)
   {
+    if(b == 0)
+    {
+      throw base_s3select_exception("division by zero is not allowed");
+    }
     return a / b;
   }
 };
@@ -365,6 +364,19 @@ struct binop_pow
   double operator()(double a, double b)
   {
     return pow(a, b);
+  }
+};
+
+struct binop_modulo
+{
+  int64_t operator()(int64_t a, int64_t b)
+  {
+    if (b == 0)
+    {
+      throw base_s3select_exception("Mod zero is not allowed");
+    } else {
+      return a % b;
+    }
   }
 };
 
@@ -749,6 +761,12 @@ public:
     return compute<binop_plus>(*this, v);
   }
 
+  value operator++(int)
+  {
+    *this = *this + 1;
+    return *this;
+  }
+    
   value& operator-(const value& v)
   {
     return compute<binop_minus>(*this, v);
@@ -769,6 +787,14 @@ public:
     return compute<binop_pow>(*this, v);
   }
 
+  value & operator%(const value &v)
+  {
+    if(v.type == value_En_t::DECIMAL) {
+      return compute<binop_modulo>(*this,v);
+    } else {
+      throw base_s3select_exception("wrong use of modulo operation!");
+    }
+  }
 };
 
 class base_statement
@@ -1271,7 +1297,7 @@ class mulldiv_operation : public base_statement
 
 public:
 
-  enum class muldiv_t {NA, MULL, DIV, POW} ;
+  enum class muldiv_t {NA, MULL, DIV, POW,MOD} ;
 
 private:
   base_statement* l;
@@ -1317,6 +1343,10 @@ public:
 
     case muldiv_t::POW:
       return var_value = l->eval() ^ r->eval();
+      break;
+
+    case muldiv_t::MOD:
+      return var_value = l->eval() % r->eval();
       break;
 
     default:

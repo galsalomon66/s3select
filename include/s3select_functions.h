@@ -3,6 +3,8 @@
 
 
 #include "s3select_oper.h"
+#include <boost/algorithm/string.hpp>
+
 #define BOOST_BIND_ACTION_PARAM( push_name ,param ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2, param)
 namespace s3selectEngine
 {
@@ -29,6 +31,7 @@ static push_4dig g_push_4dig;
 
 enum class s3select_func_En_t {ADD,
                                SUM,
+                               AVG,
                                MIN,
                                MAX,
                                COUNT,
@@ -40,6 +43,9 @@ enum class s3select_func_En_t {ADD,
                                DATE_ADD,
                                DATE_DIFF,
                                UTCNOW,
+                               LENGTH,
+                               LOWER,
+                               UPPER,
 			       VERSION
                               };
 
@@ -57,6 +63,7 @@ private:
   {
     {"add", s3select_func_En_t::ADD},
     {"sum", s3select_func_En_t::SUM},
+    {"avg", s3select_func_En_t::AVG},
     {"count", s3select_func_En_t::COUNT},
     {"min", s3select_func_En_t::MIN},
     {"max", s3select_func_En_t::MAX},
@@ -68,12 +75,20 @@ private:
     {"dateadd", s3select_func_En_t::DATE_ADD},
     {"datediff", s3select_func_En_t::DATE_DIFF},
     {"utcnow", s3select_func_En_t::UTCNOW},
+    {"charlength", s3select_func_En_t::LENGTH},
+    {"characterlength", s3select_func_En_t::LENGTH},
+    {"lower", s3select_func_En_t::LOWER},
+    {"upper", s3select_func_En_t::UPPER},
     {"version", s3select_func_En_t::VERSION}
   };
 
 public:
 
   base_function* create(std::string fn_name);
+
+  s3select_functions():m_s3select_allocator(0)
+  {
+  }
 
   void push_for_cleanup(base_statement* f)
   {
@@ -91,6 +106,7 @@ public:
   }
 
   void clean();
+
 };
 
 class __function : public base_statement
@@ -287,6 +303,42 @@ struct _fn_count : public base_function
     result->set_value(count);
   }
 
+};
+
+struct _fn_avg : public base_function
+{
+
+    value sum;
+    value count{0.0};
+
+    _fn_avg() : sum(0) { aggregate = true; }
+
+    bool operator()(bs_stmt_vec_t* args, variable *result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement *x = *iter;
+
+        try
+        {
+            sum = sum + x->eval();
+            count++;
+        }
+        catch (base_s3select_exception &e)
+        {
+            throw base_s3select_exception(e.what());
+        }
+
+        return true;
+    }
+
+    virtual void get_aggregate_result(variable *result)
+    {
+        if(count == 0) {
+            throw base_s3select_exception("count cannot be zero!");
+        } else {
+            *result = sum/count ;
+        }
+    }
 };
 
 struct _fn_min : public base_function
@@ -859,6 +911,67 @@ struct _fn_substr : public base_function
 
 };
 
+struct _fn_charlength : public base_function {
+
+    value v_str;
+ 
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement* str =  *iter;
+        v_str = str->eval();
+        if(v_str.type != value::value_En_t::STRING) {
+            throw base_s3select_exception("content is not string!");
+        } else {
+            int64_t str_length = strlen(v_str.str());
+            result->set_value(str_length);         
+            return true; 
+            }
+        }
+    };
+
+struct _fn_lower : public base_function {
+
+    std::string buff;
+    value v_str;
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement* str = *iter;
+        v_str = str->eval();
+        if(v_str.type != value::value_En_t::STRING) {
+          throw base_s3select_exception("content is not string");
+        } else {
+            buff = v_str.str();
+            boost::algorithm::to_lower(buff);
+            result->set_value(buff.c_str());         
+            return true;
+        }               
+    }
+};
+
+struct _fn_upper : public base_function {
+
+    std::string buff;
+    value v_str;
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+        bs_stmt_vec_t::iterator iter = args->begin();
+        base_statement* str = *iter;
+        v_str = str->eval();
+        if(v_str.type != value::value_En_t::STRING) {
+          throw base_s3select_exception("content is not string");
+        } else {
+            buff = v_str.str();
+            boost::algorithm::to_upper(buff);
+            result->set_value(buff.c_str());         
+            return true;
+        }               
+    }
+};
+
 base_function* s3select_functions::create(std::string fn_name)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
@@ -923,6 +1036,22 @@ base_function* s3select_functions::create(std::string fn_name)
   case s3select_func_En_t::UTCNOW:
     return S3SELECT_NEW(this,_fn_utcnow);
     break;
+
+  case s3select_func_En_t::AVG:
+    return S3SELECT_NEW(this,_fn_avg);
+    break;
+
+  case s3select_func_En_t::LOWER:
+    return S3SELECT_NEW(this,_fn_lower);
+    break;
+
+  case s3select_func_En_t::UPPER:
+    return S3SELECT_NEW(this,_fn_upper);
+    break;
+
+  case s3select_func_En_t::LENGTH:
+    return S3SELECT_NEW(this,_fn_charlength);
+    break; 
 
   case s3select_func_En_t::VERSION:
     return S3SELECT_NEW(this,_fn_version);
