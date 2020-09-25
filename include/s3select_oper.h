@@ -245,9 +245,7 @@ public:
 
   int get_column_pos(const char* n)
   {
-    //done only upon building the AST , not on "runtime"
-
-    std::vector<std::pair<std::string, int >>::iterator iter;
+    //done only upon building the AST, not on "runtime"
 
     for( auto iter : m_column_name_pos)
     {
@@ -262,7 +260,6 @@ public:
 
   std::string_view get_column_value(int column_pos)
   {
-
     if ((column_pos >= m_upper_bound) || column_pos < 0)
     {
       throw base_s3select_exception("column_position_is_wrong", base_s3select_exception::s3select_exp_en_t::ERROR);
