@@ -1130,6 +1130,11 @@ public:
     var_value = p;
   }
 
+  void set_value(bool b)
+  {
+  	var_value = b;
+  }
+
   void set_null()
   {
     var_value.setnull();
@@ -1576,6 +1581,55 @@ public:
 
     return var_value;
   }
+};
+
+class negate_function_operation : public base_statement
+{
+  //purpose: some functions (between,like,in) are participating in where-clause as predicates; thus NOT unary-operator may operate on them.
+
+  private:
+  
+  base_statement* function_to_negate;
+  value res;
+  
+  public:
+
+  negate_function_operation(base_statement *f):function_to_negate(f){}
+
+  virtual std::string print(int ident)
+  {
+    return std::string("#");//TBD
+  }
+
+  virtual bool semantic()
+  {
+    return true;
+  }
+
+  virtual base_statement* left()
+  {
+    return function_to_negate;
+  }
+
+  virtual value& eval()
+  {
+    res = function_to_negate->eval();
+
+    if (res.is_number())//TODO is integer type
+    {
+      if (res.i64() == 1)
+      {
+        res = (int64_t)0;
+      }
+      else
+      {
+        res = (int64_t)1;
+      }
+    }
+
+    return res;
+  }
+
 };
 
 class base_function

@@ -4,6 +4,7 @@
 
 #include "s3select_oper.h"
 #include <boost/algorithm/string.hpp>
+#include <regex>
 
 #define BOOST_BIND_ACTION_PARAM( push_name ,param ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2, param)
 namespace s3selectEngine
@@ -46,8 +47,12 @@ enum class s3select_func_En_t {ADD,
                                LENGTH,
                                LOWER,
                                UPPER,
-                               VERSION,
-                               NULLIF
+                               NULLIF,
+                               BETWEEN,
+                               IS_NULL,
+                               IN,
+                               LIKE,
+                               VERSION
                               };
 
 
@@ -80,13 +85,17 @@ private:
     {"characterlength", s3select_func_En_t::LENGTH},
     {"lower", s3select_func_En_t::LOWER},
     {"upper", s3select_func_En_t::UPPER},
-    {"version", s3select_func_En_t::VERSION},
-    {"nullif", s3select_func_En_t::NULLIF}
+    {"nullif", s3select_func_En_t::NULLIF},
+    {"#between#", s3select_func_En_t::BETWEEN},
+    {"#is_null#", s3select_func_En_t::IS_NULL},
+    {"#in_predicate#", s3select_func_En_t::IN},
+    {"#like_predicate#", s3select_func_En_t::LIKE},
+    {"version", s3select_func_En_t::VERSION}
   };
 
 public:
 
-  base_function* create(std::string fn_name);
+  base_function* create(std::string fn_name,bs_stmt_vec_t);
 
   s3select_functions():m_s3select_allocator(0)
   {
@@ -128,7 +137,7 @@ private:
       return;
     }
 
-    base_function* f = m_s3select_functions->create(name);
+    base_function* f = m_s3select_functions->create(name,arguments);
     if (!f)
     {
       throw base_s3select_exception("function not found", base_s3select_exception::s3select_exp_en_t::FATAL);  //should abort query
@@ -790,6 +799,45 @@ struct _fn_utcnow : public base_function
   }
 };
 
+struct _fn_between : public base_function
+{
+
+  value res;
+  
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    int args_size = args->size();
+
+
+    if (args_size != 3)
+    {
+      throw base_s3select_exception("between operates on 3 expressions");//TODO FATAL
+    }
+
+    bs_stmt_vec_t::iterator iter = args->begin();
+
+    base_statement* second_expr = *iter;
+    iter++;    
+    base_statement* first_expr = *iter;
+    iter++;    
+    base_statement* main_expr = *iter;
+ 
+    value second_expr_val = second_expr->eval();
+    value first_expr_val = first_expr->eval();
+    value main_expr_val = main_expr->eval();
+
+    if ((second_expr_val.type == first_expr_val.type && first_expr_val.type == main_expr_val.type) || (second_expr_val.is_number() && first_expr_val.is_number() && main_expr_val.is_number()))
+    {
+      if((main_expr_val >= first_expr_val) && (main_expr_val <= second_expr_val)) {
+        result->set_value(true);
+      } else {
+        result->set_value(false);
+      }
+    }
+    return true;
+  }
+};
+
 static char s3select_ver[10]="41.a";
 
 struct _fn_version : public base_function
@@ -800,6 +848,130 @@ struct _fn_version : public base_function
     val = &s3select_ver[0];
     *result = val;
     return true; 
+  }
+};
+
+struct _fn_isnull : public base_function
+{
+
+  value res;
+  
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    bs_stmt_vec_t::iterator iter = args->begin();
+    base_statement* expr = *iter;
+    value expr_val = expr->eval();
+    if ( expr_val.is_null()) {
+      result->set_value(true);
+    } else {
+      result->set_value(false);
+    }
+    return true;
+  }
+};
+
+struct _fn_in : public base_function
+{
+
+  value res;
+
+  bool operator()(bs_stmt_vec_t *args, variable *result)
+  {
+    int args_size = args->size()-1;
+    base_statement *main_expr = (*args)[args_size];
+    value main_expr_val = main_expr->eval();
+    args_size--;
+    while (args_size>=0)
+    {
+      base_statement *expr = (*args)[args_size];
+      value expr_val = expr->eval();
+      args_size--;
+      if ((expr_val.type == main_expr_val.type) || (expr_val.is_number() && main_expr_val.is_number()))
+      {
+        if (expr_val == main_expr_val)
+        {
+          result->set_value(true);
+          return true;
+        }
+      }
+    }
+    result->set_value(false);
+    return true;
+  }
+};
+
+struct _fn_like : public base_function
+{
+
+  value res;
+  std::regex compiled_regex;
+
+  _fn_like(value s)
+  {
+    std::string string_value = s.to_string();
+    transform(string_value);
+    compiled_regex = std::regex(string_value);
+  } 
+
+  void transform(std::string& s)
+  {
+    std::string::size_type i = 0;
+    while (!s.empty())
+    {
+        i = s.find("%%", i);
+        if (i == std::string::npos) break;
+        s.erase(i, 1);      
+    }
+    bool startswith = (s[0] == '%' && s[s.size()-1] != '%');
+    bool endswith = (s[0] != '%' && s[s.size()-1] == '%');
+    bool startend = (s[0] == '%' && s[s.size()-1] == '%');
+    if (startswith) {
+      std::replace(s.begin(), s.begin()+1, '%', '^');
+      s.insert(1, ".");
+      s.insert(2, "*");
+      s.append("$");
+      std::replace(s.begin(), s.end(), '_', '.');
+    } else if (endswith) {
+      s.insert(0, "^");
+      std::replace(s.end()-1, s.end(), '%', '$');
+      s.insert(s.size()-1,".");
+      s.insert(s.size()-1,"*");
+      std::replace(s.begin(), s.end(), '_', '.');
+    } else if (startend) {
+      std::replace(s.begin(), s.begin()+1, '%', '^');
+      s.insert(1, ".");
+      s.insert(2, "*");
+      std::replace(s.end()-1, s.end(), '%', '$');
+      s.insert(s.size()-1,".");
+      s.insert(s.size()-1,"*");
+      std::replace(s.begin(), s.end(), '_', '.');
+    } else {
+      std::string findThis = "%";
+      std::string replaceWith = ".*";
+      s.insert(0,"^");
+      s.append("$");
+      std::size_t pos = 0;
+      while ((pos = s.find(findThis, pos)) != std::string::npos)
+      {
+        s.replace(pos, findThis.length(), replaceWith);
+        pos += replaceWith.length();
+      }
+      std::replace(s.begin(), s.end(), '_', '.');
+    }
+  }
+  
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    bs_stmt_vec_t::iterator iter = args->begin();
+    iter++;
+    base_statement* main_expr = *iter;
+    value main_expr_val = main_expr->eval();
+    if ( std::regex_match(main_expr_val.to_string(), compiled_regex)) {
+      result->set_value(true);
+    } else {
+      result->set_value(false);
+    }
+    return true;
   }
 };
 
@@ -1018,7 +1190,7 @@ struct _fn_nullif : public base_function {
       }
     };
 
-base_function* s3select_functions::create(std::string fn_name)
+base_function* s3select_functions::create(std::string fn_name,bs_stmt_vec_t arguments)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
 
@@ -1099,12 +1271,28 @@ base_function* s3select_functions::create(std::string fn_name)
     return S3SELECT_NEW(this,_fn_charlength);
     break; 
 
+  case s3select_func_En_t::BETWEEN:
+    return S3SELECT_NEW(this,_fn_between);
+    break;
+
+  case s3select_func_En_t::IS_NULL:
+    return S3SELECT_NEW(this,_fn_isnull);
+    break;
+
+  case s3select_func_En_t::IN:
+    return S3SELECT_NEW(this,_fn_in);
+    break;
+
   case s3select_func_En_t::VERSION:
     return S3SELECT_NEW(this,_fn_version);
     break;
 
   case s3select_func_En_t::NULLIF:
     return S3SELECT_NEW(this,_fn_nullif);
+    break;
+
+  case s3select_func_En_t::LIKE:  
+    return S3SELECT_NEW(this,_fn_like, arguments[0]->eval());
     break;
 
   default:

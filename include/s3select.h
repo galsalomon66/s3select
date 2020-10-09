@@ -70,6 +70,9 @@ struct actionQ
   std::string from_clause;
   std::vector<std::string> schema_columns;
   s3select_projections  projections;
+  uint64_t in_set_count;
+
+  actionQ():in_set_count(0){}
 
 };
 
@@ -200,6 +203,42 @@ struct push_alias_projection
   void operator()(s3select* self, const char* a, const char* b) const;
 };
 static push_alias_projection g_push_alias_projection;
+
+struct push_between_filter
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_between_filter g_push_between_filter;
+
+struct push_in_predicate
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate g_push_in_predicate;
+
+struct push_in_predicate_counter
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate_counter g_push_in_predicate_counter;
+
+struct push_in_predicate_counter_start
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate_counter_start g_push_in_predicate_counter_start;
+
+struct push_like_predicate
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_like_predicate g_push_like_predicate;
+
+struct push_is_null_predicate
+{
+  void operator()(s3select* self, const char* a, const char* b) const;
+};
+static push_is_null_predicate g_push_is_null_predicate;
 
 struct push_debug_1
 {
@@ -408,7 +447,17 @@ public:
 
       binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
 
-      arithmetic_predicate = (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+      arithmetic_predicate = (special_predicates) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+
+      special_predicates = (is_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
+
+      is_null = (arithmetic_expression >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+
+      between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
+
+      in_predicate = (arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_counter_start)] >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_counter)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_counter)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
+
+      like_predicate = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate)];
 
       factor = (arithmetic_expression) | ('(' >> condition_expression >> ')') ;
 
@@ -448,6 +497,7 @@ public:
 
 
     bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
+    bsc::rule<ScannerT> special_predicates,between_predicate, in_predicate, like_predicate, is_null, is_not_null;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
@@ -755,6 +805,11 @@ void push_negation::operator()(s3select* self, const char* a, const char* b) con
     logical_operand* f = S3SELECT_NEW(self, logical_operand, pred);
     self->getAction()->condQ.push_back(f);
   }
+  else if (dynamic_cast<__function*>(pred) || dynamic_cast<negate_function_operation*>(pred))
+  {
+    negate_function_operation* nf = S3SELECT_NEW(self, negate_function_operation, pred);
+    self->getAction()->condQ.push_back(nf);
+  }
   else
   {
     arithmetic_operand* f = S3SELECT_NEW(self, arithmetic_operand, pred);
@@ -806,6 +861,115 @@ void push_alias_projection::operator()(s3select* self, const char* a, const char
 
   self->getAction()->projections.get()->push_back(bs);
   self->getAction()->exprQ.pop_back();
+}
+
+void push_between_filter::operator()(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string between_function("#between#");
+
+  __function* func = S3SELECT_NEW(self, __function, between_function.c_str(), self->getS3F());
+
+  base_statement* second_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(second_expr);
+
+  base_statement* first_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(first_expr);
+
+  base_statement* main_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(main_expr);
+
+  self->getAction()->condQ.push_back(func);
+}
+
+void push_in_predicate_counter::operator()(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  self->getAction()->in_set_count ++;
+
+}
+
+void push_in_predicate_counter_start::operator()(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  self->getAction()->in_set_count = 1;
+
+}
+
+void push_in_predicate::operator()(s3select* self, const char* a, const char* b) const
+{
+  // expr in (e1,e2,e3 ...)
+  std::string token(a, b);
+
+  std::string in_function("#in_predicate#");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  while(self->getAction()->in_set_count)
+  {
+    base_statement* ei = self->getAction()->exprQ.back();
+
+    self->getAction()->exprQ.pop_back();
+
+    func->push_argument(ei);
+
+    self->getAction()->in_set_count --;
+  }
+
+  self->getAction()->condQ.push_back(func);
+}
+
+void push_like_predicate::operator()(s3select* self, const char* a, const char* b) const
+{
+  // expr like expr ; both should be string, the second expression could be compiled at the
+  // time AST is build, which will improve performance much.
+
+  std::string token(a, b);
+  std::string in_function("#like_predicate#");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  if (!dynamic_cast<variable*>(expr))
+  {
+    throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }else if( dynamic_cast<variable*>(expr)->m_var_type != variable::var_t::COL_VALUE)
+  {
+    throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  func->push_argument(expr);
+
+  base_statement* main_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(main_expr);
+
+  self->getAction()->condQ.push_back(func);
+}
+
+void push_is_null_predicate::operator()(s3select* self, const char* a, const char* b) const
+{
+    //expression is null 
+  std::string token(a, b);
+      
+  std::string in_function("#is_null#");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(expr);
+
+  self->getAction()->condQ.push_back(func);
+
 }
 
 void push_debug_1::operator()(s3select* self, const char* a, const char* b) const
@@ -1081,7 +1245,33 @@ public:
     return 0;
   }
 
+
   int run_s3select_on_stream(std::string& result, const char* csv_stream, size_t stream_length, size_t obj_size)
+  {
+    int status=0;
+    try{
+        status = run_s3select_on_stream_internal(result,csv_stream,stream_length,obj_size);
+    }
+    catch(base_s3select_exception& e)
+    {
+        m_error_description = e.what();
+        m_error_count ++;
+        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100)//abort query execution
+        {
+          return -1;
+        }
+    }
+    catch(chunkalloc_out_of_mem)
+    {
+      m_error_description = "out of memory";
+      return -1;
+    }
+
+    return status;
+  }
+
+private:
+  int run_s3select_on_stream_internal(std::string& result, const char* csv_stream, size_t stream_length, size_t obj_size)
   {
     //purpose: the cv data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
     //for later, upon next chunk of data is streaming, the stored-line is merge with current broken-line, and processed.
@@ -1130,6 +1320,7 @@ public:
     return status;
   }
 
+public:
   int run_s3select_on_object(std::string& result, const char* csv_stream, size_t stream_length, bool skip_first_line, bool skip_last_line, bool do_aggregate)
   {
 
