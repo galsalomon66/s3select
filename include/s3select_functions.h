@@ -52,7 +52,11 @@ enum class s3select_func_En_t {ADD,
                                IS_NULL,
                                IN,
                                LIKE,
-                               VERSION
+                               VERSION,
+                               CASE_WHEN_ELSE,
+                               WHEN_THAN,
+                               COALESCE,
+                               STRING
                               };
 
 
@@ -81,8 +85,8 @@ private:
     {"dateadd", s3select_func_En_t::DATE_ADD},
     {"datediff", s3select_func_En_t::DATE_DIFF},
     {"utcnow", s3select_func_En_t::UTCNOW},
-    {"charlength", s3select_func_En_t::LENGTH},
-    {"characterlength", s3select_func_En_t::LENGTH},
+    {"character_length", s3select_func_En_t::LENGTH},
+    {"char_length", s3select_func_En_t::LENGTH},
     {"lower", s3select_func_En_t::LOWER},
     {"upper", s3select_func_En_t::UPPER},
     {"nullif", s3select_func_En_t::NULLIF},
@@ -90,7 +94,11 @@ private:
     {"#is_null#", s3select_func_En_t::IS_NULL},
     {"#in_predicate#", s3select_func_En_t::IN},
     {"#like_predicate#", s3select_func_En_t::LIKE},
-    {"version", s3select_func_En_t::VERSION}
+    {"version", s3select_func_En_t::VERSION},
+    {"#when-than#", s3select_func_En_t::WHEN_THAN},
+    {"#case-when-else#", s3select_func_En_t::CASE_WHEN_ELSE},
+    {"coalesce", s3select_func_En_t::COALESCE},
+    {"string", s3select_func_En_t::STRING}
   };
 
 public:
@@ -426,8 +434,18 @@ struct _fn_to_int : public base_function
 
     if (func_arg.type == value::value_En_t::STRING)
     {
+      errno = 0;
       i = strtol(func_arg.str(), &perr, 10) ;  //TODO check error before constructor
+      if ((errno == ERANGE && (i == LONG_MAX || i == LONG_MIN)) || (errno != 0 && i == 0)) {
+        throw base_s3select_exception("converted value would fall out of the range of the result type!");
+        return false;   
     }
+    
+    if (*perr != '\0') {
+      throw base_s3select_exception("characters after int!");
+      return false;
+    }
+  } 
     else if (func_arg.type == value::value_En_t::FLOAT)
     {
       i = func_arg.dbl();
@@ -459,8 +477,18 @@ struct _fn_to_float : public base_function
 
     if (v.type == value::value_En_t::STRING)
     {
+      errno = 0;
       d = strtod(v.str(), &perr) ;  //TODO check error before constructor
+      if ((errno == ERANGE && (d == LONG_MAX || d == LONG_MIN)) || (errno != 0 && d == 0)) {
+        throw base_s3select_exception("converted value would fall out of the range of the result type!");
+        return false;  
     }
+    
+    if (*perr != '\0') {
+      throw base_s3select_exception("characters after float!");
+      return false;
+    }
+  }
     else if (v.type == value::value_En_t::FLOAT)
     {
       d = v.dbl();
@@ -1190,6 +1218,101 @@ struct _fn_nullif : public base_function {
       }
     };
 
+struct _fn_when_than : public base_function {
+
+  value when_value,than_value;
+
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    bs_stmt_vec_t::iterator iter = args->begin();
+
+    base_statement* than_expr = *iter;
+    iter ++;
+
+    base_statement* when_expr = *iter;
+
+    when_value = when_expr->eval();
+    
+    if (when_value.i64())//true
+    {
+        *result = than_expr->eval();
+        return true;
+    }
+
+    result->set_null();
+
+    return true;
+  }
+};
+
+struct _fn_case_when_else : public base_function {
+
+  value when_than_value;
+
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    base_statement* else_expr = *(args->begin());
+
+    size_t args_size = args->size() -1;
+
+    for(int ivec=args_size;ivec>0;ivec--)
+    {
+      when_than_value = (*args)[ivec]->eval();
+      
+      if(!when_than_value.is_null())
+      {
+        *result = when_than_value;
+        return true;
+      }
+
+    }
+
+    *result = else_expr->eval();
+    return true;
+  }
+};
+
+struct _fn_coalesce : public base_function
+{
+
+  value res;
+
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    bs_stmt_vec_t::iterator iter_begin = args->begin();
+    int args_size = args->size();
+    while (args_size >= 1)
+    {
+      base_statement* expr = *iter_begin;
+      value expr_val = expr->eval();
+      iter_begin++;
+      if ( !(expr_val.is_null())) {
+          *result = expr_val;
+          return true;
+        } 
+      args_size--;
+    }
+    result->set_null();
+    return true;
+  }
+};
+
+struct _fn_string : public base_function
+{
+
+  value res;
+
+  bool operator()(bs_stmt_vec_t* args, variable* result)
+  {
+    bs_stmt_vec_t::iterator iter = args->begin();
+
+    base_statement* expr = *iter;
+    value expr_val = expr->eval();
+    result->set_value((expr_val.to_string()).c_str());
+    return true;
+  }
+};
+
 base_function* s3select_functions::create(std::string fn_name,bs_stmt_vec_t arguments)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
@@ -1293,6 +1416,21 @@ base_function* s3select_functions::create(std::string fn_name,bs_stmt_vec_t argu
 
   case s3select_func_En_t::LIKE:  
     return S3SELECT_NEW(this,_fn_like, arguments[0]->eval());
+    break;
+  case s3select_func_En_t::COALESCE:
+    return S3SELECT_NEW(this,_fn_coalesce);
+    break;
+
+  case s3select_func_En_t::WHEN_THAN:
+    return S3SELECT_NEW(this,_fn_when_than);
+    break;
+
+  case s3select_func_En_t::CASE_WHEN_ELSE:
+    return S3SELECT_NEW(this,_fn_case_when_else);
+    break;
+
+  case s3select_func_En_t::STRING:
+    return S3SELECT_NEW(this,_fn_string);
     break;
 
   default:
