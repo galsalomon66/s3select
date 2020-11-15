@@ -882,7 +882,7 @@ public:
     return compute<binop_mult>(*this, v);
   }
   
-  value& operator/(value& v)  // TODO  handle division by zero
+  value& operator/(value& v)
   {
     if (v.is_null() || this->is_null()) {
       v.set_nan();
@@ -1454,7 +1454,7 @@ class mulldiv_operation : public base_statement
 
 public:
 
-  enum class muldiv_t {NA, MULL, DIV, POW,MOD} ;
+  enum class muldiv_t {NA, MULL, DIV, POW, MOD} ;
 
 private:
   base_statement* l;
@@ -1462,6 +1462,7 @@ private:
 
   muldiv_t _mulldiv;
   value var_value;
+  value tmp_value;
 
 public:
 
@@ -1491,19 +1492,23 @@ public:
     switch (_mulldiv)
     {
     case muldiv_t::MULL:
-      return var_value = l->eval() * r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value * r->eval();
       break;
 
     case muldiv_t::DIV:
-      return var_value = l->eval() / r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value / r->eval();
       break;
 
     case muldiv_t::POW:
-      return var_value = l->eval() ^ r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value ^ r->eval();
       break;
 
     case muldiv_t::MOD:
-      return var_value = l->eval() % r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value % r->eval();
       break;
 
     default:
@@ -1530,6 +1535,7 @@ private:
 
   addsub_op_t _op;
   value var_value;
+  value tmp_value;
 
 public:
 
@@ -1571,12 +1577,12 @@ public:
       }
     }
     else if (_op == addsub_op_t::ADD)
-    {
-      return var_value = (l->eval() + r->eval());
+    {tmp_value=l->eval();
+      return var_value = (tmp_value + r->eval());
     }
     else
-    {
-      return var_value = (l->eval() - r->eval());
+    {tmp_value=l->eval();
+      return var_value = (tmp_value - r->eval());
     }
 
     return var_value;

@@ -485,6 +485,43 @@ TEST(TestS3selectFunctions, max)
     ASSERT_EQ(s3select_result, std::string("127,12.699999999999999,"));
 }
 
+
+int count_string(std::string in,std::string substr)
+{
+    int count = 0;
+    size_t nPos = in.find(substr, 0); // first occurrence
+    while(nPos != std::string::npos)
+    {
+        count++;
+        nPos = in.find(substr, nPos + 1);
+    }
+
+    return count;
+}
+
+TEST(TestS3selectFunctions, binop_constant)
+{
+    //bug-fix for expresion with constant value on the left side(the bug change the constant values between rows)
+    s3select s3select_syntax;
+    const std::string input_query = "select 10+1,20-12,2*3,128/2,29%5,2^10 from stdin;";
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0);
+
+    int count = count_string(s3select_result,"11,8,6,64,4,1024");
+    ASSERT_EQ(count,size);
+}
+
 TEST(TestS3selectOperator, add)
 {
     const std::string input_query = "select -5 + 0.5 + -0.25 from stdin;" ;
