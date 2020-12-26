@@ -73,11 +73,12 @@ struct actionQ
   std::string from_clause;
   std::vector<std::string> schema_columns;
   s3select_projections  projections;
+
   uint64_t in_set_count;
 
   size_t when_than_count;
 
-  actionQ():when_than_count(0), in_set_count(0){}
+  actionQ():in_set_count(0), when_than_count(0){}
 
   std::map<void*,std::vector<char*> *> x_map;
 
@@ -119,6 +120,8 @@ struct base_ast_builder
   void operator()(s3select* self, const char* a, const char* b) const;
 
   virtual void builder(s3select* self, const char* a, const char* b) const = 0;
+  
+  virtual ~base_ast_builder() = default;
 };
 
 struct push_from_clause : public base_ast_builder

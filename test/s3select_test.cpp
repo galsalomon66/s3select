@@ -35,7 +35,7 @@ std::string run_expression_in_C_prog(const char* expression)
 				printf(\"%%.*e\\n\",DECIMAL_DIG,(double)(%s));\
 				} ", expression);
 
-    int status = fwrite(prog_c, 1, sz, fp_c_file);
+    fwrite(prog_c, 1, sz, fp_c_file);
     fclose(fp_c_file);
   }
 

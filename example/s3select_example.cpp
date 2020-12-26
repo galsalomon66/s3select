@@ -32,7 +32,6 @@ int main(int argc, char** argv)
   }
 
 
-  bool to_aggregate = false;
 
   int status = s3select_syntax.parse_query(input_query);
   if (status != 0)
