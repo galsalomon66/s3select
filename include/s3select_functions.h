@@ -4,6 +4,7 @@
 
 #include "s3select_oper.h"
 #include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <regex>
 
 #define BOOST_BIND_ACTION_PARAM( push_name ,param ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2, param)
@@ -56,7 +57,10 @@ enum class s3select_func_En_t {ADD,
                                CASE_WHEN_ELSE,
                                WHEN_THAN,
                                COALESCE,
-                               STRING
+                               STRING,
+                               TRIM,
+                               LEADING,
+                               TRAILING
                               };
 
 
@@ -79,7 +83,7 @@ private:
     {"max", s3select_func_En_t::MAX},
     {"int", s3select_func_En_t::TO_INT},
     {"float", s3select_func_En_t::TO_FLOAT},
-    {"substr", s3select_func_En_t::SUBSTR},
+    {"substring", s3select_func_En_t::SUBSTR},
     {"timestamp", s3select_func_En_t::TO_TIMESTAMP},
     {"extract", s3select_func_En_t::EXTRACT},
     {"dateadd", s3select_func_En_t::DATE_ADD},
@@ -98,7 +102,10 @@ private:
     {"#when-than#", s3select_func_En_t::WHEN_THAN},
     {"#case-when-else#", s3select_func_En_t::CASE_WHEN_ELSE},
     {"coalesce", s3select_func_En_t::COALESCE},
-    {"string", s3select_func_En_t::STRING}
+    {"string", s3select_func_En_t::STRING},
+    {"#trim#", s3select_func_En_t::TRIM},
+    {"#leading#", s3select_func_En_t::LEADING},
+    {"#trailing#", s3select_func_En_t::TRAILING}
   };
 
 public:
@@ -1035,6 +1042,11 @@ struct _fn_substr : public base_function
     {
       iter++;
       to = *iter;
+      v_to = to->eval();
+      if (!v_to.is_number())
+      {
+        throw base_s3select_exception("substr third argument must be number");  //can skip row
+      }
     }
 
     v_str = str->eval();
@@ -1047,22 +1059,13 @@ struct _fn_substr : public base_function
     int str_length = strlen(v_str.str());
 
     v_from = from->eval();
-    if(v_from.is_string())
+    if(!v_from.is_number())
     {
       throw base_s3select_exception("substr second argument must be number");  //can skip current row
     }
 
     int64_t f;
     int64_t t;
-
-    if (args_size==3)
-    {
-      v_to = to->eval();
-      if (v_to.is_string())
-      {
-        throw base_s3select_exception("substr third argument must be number");  //can skip row
-      }
-    }
 
     if (v_from.type == value::value_En_t::FLOAT)
     {
@@ -1071,6 +1074,11 @@ struct _fn_substr : public base_function
     else
     {
       f=v_from.i64();
+    }
+
+    if (f <= 0 && args_size == 2)
+    {
+      f = 1;
     }
 
     if (f>str_length)
@@ -1094,6 +1102,17 @@ struct _fn_substr : public base_function
         t = v_to.i64();
       }
 
+      if ( f <= 0)
+      {
+        t = t + f - 1;
+        f = 1;
+      }
+
+      if (t > str_length)
+      {
+        t = str_length;
+      }
+
       if( (str_length-(f-1)-t) <0)
       {
         throw base_s3select_exception("substr length parameter beyond bounderies");  //can skip row
@@ -1110,7 +1129,6 @@ struct _fn_substr : public base_function
 
     return true;
   }
-
 };
 
 struct _fn_charlength : public base_function {
@@ -1313,6 +1331,103 @@ struct _fn_string : public base_function
   }
 };
 
+struct _fn_trim : public base_function {
+
+    std::string input_string;
+    value v_remove;
+    value v_input;
+
+    _fn_trim()
+    {
+    	v_remove = " "; 
+    }
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+    	bs_stmt_vec_t::iterator iter = args->begin();
+    	int args_size = args->size();
+    	base_statement* str = *iter;
+        v_input = str->eval();
+        if(v_input.type != value::value_En_t::STRING) {
+            throw base_s3select_exception("content is not string");
+        }
+        input_string = v_input.str();
+        if (args_size == 2) {
+        	iter++;
+            base_statement* next = *iter;
+            v_remove = next->eval();
+        }
+        boost::trim_right_if(input_string,boost::is_any_of(v_remove.str()));
+        boost::trim_left_if(input_string,boost::is_any_of(v_remove.str()));
+    	result->set_value(input_string.c_str());
+      return true;
+    }
+}; 
+
+struct _fn_leading : public base_function {
+
+    std::string input_string;
+    value v_remove;
+    value v_input;
+
+    _fn_leading()
+    {
+    	v_remove = " "; 
+    }
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+    	bs_stmt_vec_t::iterator iter = args->begin();
+    	int args_size = args->size();
+    	base_statement* str = *iter;
+        v_input = str->eval();
+        if(v_input.type != value::value_En_t::STRING) {
+            throw base_s3select_exception("content is not string");
+        }
+        input_string = v_input.str();
+        if (args_size == 2) {
+        	iter++;
+            base_statement* next = *iter;
+            v_remove = next->eval();
+        }
+        boost::trim_left_if(input_string,boost::is_any_of(v_remove.str()));
+    	result->set_value(input_string.c_str());
+      return true;
+    }
+}; 
+
+struct _fn_trailing : public base_function {
+
+    std::string input_string;
+    value v_remove;
+    value v_input;
+
+    _fn_trailing()
+    {
+    	v_remove = " "; 
+    }
+
+    bool operator()(bs_stmt_vec_t* args, variable* result)
+    {
+    	bs_stmt_vec_t::iterator iter = args->begin();
+    	int args_size = args->size();
+    	base_statement* str = *iter;
+        v_input = str->eval();
+        if(v_input.type != value::value_En_t::STRING) {
+            throw base_s3select_exception("content is not string");
+        }
+        input_string = v_input.str();
+        if (args_size == 2) {
+        	iter++;
+            base_statement* next = *iter;
+            v_remove = next->eval();
+        }
+        boost::trim_right_if(input_string,boost::is_any_of(v_remove.str()));
+    	result->set_value(input_string.c_str());
+      return true;
+    }
+}; 
+
 base_function* s3select_functions::create(std::string fn_name,bs_stmt_vec_t arguments)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
@@ -1431,6 +1546,18 @@ base_function* s3select_functions::create(std::string fn_name,bs_stmt_vec_t argu
 
   case s3select_func_En_t::STRING:
     return S3SELECT_NEW(this,_fn_string);
+    break;
+
+  case s3select_func_En_t::TRIM:  
+    return S3SELECT_NEW(this,_fn_trim);
+    break;
+
+  case s3select_func_En_t::LEADING:  
+    return S3SELECT_NEW(this,_fn_leading);
+    break;
+
+  case s3select_func_En_t::TRAILING:  
+    return S3SELECT_NEW(this,_fn_trailing);
     break;
 
   default:
