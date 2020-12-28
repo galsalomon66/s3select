@@ -7,6 +7,8 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <regex>
 
+using namespace std::string_literals;
+
 #define BOOST_BIND_ACTION_PARAM( push_name ,param ) boost::bind( &push_name::operator(), g_ ## push_name , _1 ,_2, param)
 namespace s3selectEngine
 {
@@ -110,9 +112,9 @@ private:
 
 public:
 
-  base_function* create(std::string fn_name,bs_stmt_vec_t);
+  base_function* create(std::string_view fn_name,const bs_stmt_vec_t&);
 
-  s3select_functions():m_s3select_allocator(0)
+  s3select_functions():m_s3select_allocator(nullptr)
   {
   }
 
@@ -171,7 +173,7 @@ public:
     return m_func_impl;
   }
 
-  virtual void traverse_and_apply(scratch_area* sa, projection_alias* pa)
+  void traverse_and_apply(scratch_area* sa, projection_alias* pa) override
   {
     m_scratch = sa;
     m_aliases = pa;
@@ -301,7 +303,7 @@ struct _fn_sum : public base_function
     return true;
   }
 
-  virtual void get_aggregate_result(variable* result)
+  void get_aggregate_result(variable* result) override
   {
     *result = sum ;
   }
@@ -324,7 +326,7 @@ struct _fn_count : public base_function
     return true;
   }
 
-  virtual void get_aggregate_result(variable* result)
+  void get_aggregate_result(variable* result) override
   {
     result->set_value(count);
   }
@@ -357,7 +359,7 @@ struct _fn_avg : public base_function
         return true;
     }
 
-    virtual void get_aggregate_result(variable *result)
+    void get_aggregate_result(variable *result) override
     {
         if(count == 0) {
             throw base_s3select_exception("count cannot be zero!");
@@ -390,7 +392,7 @@ struct _fn_min : public base_function
     return true;
   }
 
-  virtual void get_aggregate_result(variable* result)
+  void get_aggregate_result(variable* result) override
   {
     *result = min;
   }
@@ -420,7 +422,7 @@ struct _fn_max : public base_function
     return true;
   }
 
-  virtual void get_aggregate_result(variable* result)
+  void get_aggregate_result(variable* result) override
   {
     *result = max;
   }
@@ -1428,14 +1430,14 @@ struct _fn_trailing : public base_function {
     }
 }; 
 
-base_function* s3select_functions::create(std::string fn_name,bs_stmt_vec_t arguments)
+base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt_vec_t &arguments)
 {
-  const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name);
+  const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name.data());
 
   if (iter == m_functions_library.end())
   {
     std::string msg;
-    msg = fn_name + " " + " function not found";
+    msg = std::string{fn_name} + " " + " function not found";
     throw base_s3select_exception(msg, base_s3select_exception::s3select_exp_en_t::FATAL);
   }
 

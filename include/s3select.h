@@ -322,12 +322,6 @@ struct push_substr_from_for : public base_ast_builder
 };
 static push_substr_from_for g_push_substr_from_for;
 
-struct push_debug_1 : public base_ast_builder
-{
-  void builder(s3select* self, const char* a, const char* b) const;
-};
-static push_debug_1 g_push_debug_1;
-
 struct push_trim_type : public base_ast_builder
 {
   void builder(s3select* self, const char* a, const char* b) const;
@@ -389,11 +383,11 @@ public:
 
   int semantic()
   {
-    for (auto e : get_projections_list())
+    for (const auto& e : get_projections_list())
     {
-      base_statement* aggr = 0;
+      base_statement* aggr;
 
-      if ((aggr = e->get_aggregate()) != 0)
+      if ((aggr = e->get_aggregate()) != nullptr)
       {
         if (aggr->is_nested_aggregate(aggr))
         {
@@ -406,9 +400,9 @@ public:
     }
 
     if (aggr_flow == true)
-      for (auto e : get_projections_list())
+      for (const auto& e : get_projections_list())
       {
-        base_statement* skip_expr = e->get_aggregate();
+        auto skip_expr = e->get_aggregate();
 
         if (e->is_binop_aggregate_and_column(skip_expr))
         {
@@ -475,7 +469,7 @@ public:
     return  cond->semantic();
   }
 
-  std::string get_from_clause()
+  std::string get_from_clause() const
   {
     return m_actionQ.from_clause;
   }
@@ -483,7 +477,7 @@ public:
   void load_schema(std::vector< std::string>& scm)
   {
     int i = 0;
-    for (auto c : scm)
+    for (auto& c : scm)
     {
       m_sca.set_column_pos(c.c_str(), i++);
     }
@@ -491,9 +485,9 @@ public:
 
   base_statement* get_filter()
   {
-    if(m_actionQ.condQ.size()==0)
+    if(m_actionQ.condQ.empty())
     {
-      return NULL;
+      return nullptr;
     }
 
     return m_actionQ.condQ.back();
@@ -514,7 +508,7 @@ public:
     return &m_actionQ.alias_map;
   }
 
-  bool is_aggregate_query()
+  bool is_aggregate_query() const
   {
     return aggr_flow == true;
   }
@@ -528,7 +522,7 @@ public:
   template <typename ScannerT>
   struct definition
   {
-    definition(s3select const& self)
+    explicit definition(s3select const& self)
     {
       ///// s3select syntax rules and actions for building AST
 
@@ -706,7 +700,7 @@ void push_variable::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  variable* v = 0;
+  variable* v = nullptr;
 
   if (g_s3select_reserve_word.is_reserved_word(token))
   {
@@ -736,7 +730,7 @@ void push_addsub::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  if (token.compare("+") == 0)
+  if (token == "+")
   {
     self->getAction()->addsubQ.push_back(addsub_operation::addsub_op_t::ADD);
   }
@@ -750,15 +744,15 @@ void push_mulop::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  if (token.compare("*") == 0)
+  if (token == "*")
   {
     self->getAction()->muldivQ.push_back(mulldiv_operation::muldiv_t::MULL);
   }
-  else if (token.compare("/") == 0)
+  else if (token == "/")
   {
     self->getAction()->muldivQ.push_back(mulldiv_operation::muldiv_t::DIV);
   }
-  else if(token.compare("^") == 0)
+  else if(token == "^")
   {
     self->getAction()->muldivQ.push_back(mulldiv_operation::muldiv_t::POW);
   }
@@ -768,9 +762,9 @@ void push_mulop::builder(s3select* self, const char* a, const char* b) const
   }
 }
 
-void push_addsub_binop::builder(s3select* self, const char* a, const char* b) const
+void push_addsub_binop::builder(s3select* self, [[maybe_unused]] const char* a,[[maybe_unused]] const char* b) const
 {
-  base_statement* l = 0, *r = 0;
+  base_statement* l = nullptr, *r = nullptr;
 
   r = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
@@ -782,9 +776,9 @@ void push_addsub_binop::builder(s3select* self, const char* a, const char* b) co
   self->getAction()->exprQ.push_back(as);
 }
 
-void push_mulldiv_binop::builder(s3select* self, const char* a, const char* b) const
+void push_mulldiv_binop::builder(s3select* self, [[maybe_unused]] const char* a, [[maybe_unused]] const char* b) const
 {
-  base_statement* vl = 0, *vr = 0;
+  base_statement* vl = nullptr, *vr = nullptr;
 
   vr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
@@ -840,33 +834,29 @@ void push_compare_operator::builder(s3select* self, const char* a, const char* b
   std::string token(a, b);
   arithmetic_operand::cmp_t c = arithmetic_operand::cmp_t::NA;
 
-  if (token.compare("==") == 0)
+  if (token == "==")
   {
     c = arithmetic_operand::cmp_t::EQ;
   }
-  else if (token.compare("!=") == 0)
+  else if (token == "!=")
   {
     c = arithmetic_operand::cmp_t::NE;
   }
-  else if (token.compare(">=") == 0)
+  else if (token == ">=")
   {
     c = arithmetic_operand::cmp_t::GE;
   }
-  else if (token.compare("<=") == 0)
+  else if (token == "<=")
   {
     c = arithmetic_operand::cmp_t::LE;
   }
-  else if (token.compare(">") == 0)
+  else if (token == ">")
   {
     c = arithmetic_operand::cmp_t::GT;
   }
-  else if (token.compare("<") == 0)
+  else if (token == "<")
   {
     c = arithmetic_operand::cmp_t::LT;
-  }
-  else
-  {
-    c = arithmetic_operand::cmp_t::NA;
   }
 
   self->getAction()->arithmetic_compareQ.push_back(c);
@@ -877,17 +867,13 @@ void push_logical_operator::builder(s3select* self, const char* a, const char* b
   std::string token(a, b);
   logical_operand::oplog_t l = logical_operand::oplog_t::NA;
 
-  if (token.compare("and") == 0)
+  if (token == "and")
   {
     l = logical_operand::oplog_t::AND;
   }
-  else if (token.compare("or") == 0)
+  else if (token == "or")
   {
     l = logical_operand::oplog_t::OR;
-  }
-  else
-  {
-    l = logical_operand::oplog_t::NA;
   }
 
   self->getAction()->logical_compareQ.push_back(l);
@@ -914,7 +900,7 @@ void push_logical_predicate::builder(s3select* self, const char* a, const char* 
 {
   std::string token(a, b);
 
-  base_statement* tl = 0, *tr = 0;
+  base_statement* tl = nullptr, *tr = nullptr;
   logical_operand::oplog_t oplog = self->getAction()->logical_compareQ.back();
   self->getAction()->logical_compareQ.pop_back();
 
@@ -937,7 +923,8 @@ void push_logical_predicate::builder(s3select* self, const char* a, const char* 
 void push_negation::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
-  base_statement* pred;
+  base_statement* pred = nullptr;
+
   if (self->getAction()->condQ.empty() == false)
   {
     pred = self->getAction()->condQ.back();
@@ -966,7 +953,7 @@ void push_column_pos::builder(s3select* self, const char* a, const char* b) cons
   std::string token(a, b);
   variable* v;
 
-  if (token.compare("*") == 0 || token.compare("* ") == 0) //TODO space should skip in boost::spirit
+  if (token == "*" || token == "* ") //TODO space should skip in boost::spirit
   {
     v = S3SELECT_NEW(self, variable, token, variable::var_t::STAR_OPERATION);
   }
@@ -1085,7 +1072,8 @@ void push_like_predicate::builder(s3select* self, const char* a, const char* b) 
   if (!dynamic_cast<variable*>(expr))
   {
     throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
-  }else if( dynamic_cast<variable*>(expr)->m_var_type != variable::var_t::COL_VALUE)
+  }
+  else if( dynamic_cast<variable*>(expr)->m_var_type != variable::var_t::COL_VALUE)
   {
     throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
   }
@@ -1317,11 +1305,6 @@ void push_substr_from_for::builder(s3select* self, const char* a, const char* b)
   self->getAction()->exprQ.push_back(func);
 }  
 
-void push_debug_1::builder(s3select* self, const char* a, const char* b) const
-{
-  std::string token(a, b);
-}
-
 /////// handling different object types
 class base_s3object
 {
@@ -1331,15 +1314,14 @@ protected:
   std::string m_obj_name;
 
 public:
-  base_s3object(scratch_area* m) : m_sa(m), m_obj_name("") {}
+  explicit base_s3object(scratch_area* m) : m_sa(m){}
 
   void set(scratch_area* m)
   {
     m_sa = m;
-    m_obj_name = "";
   }
 
-  virtual ~base_s3object() {}
+  virtual ~base_s3object() = default;
 };
 
 
@@ -1360,10 +1342,10 @@ public:
 
   } m_csv_defintion;
 
-  csv_object(s3select* s3_query) :
+  explicit csv_object(s3select* s3_query) :
     base_s3object(s3_query->get_scratch_area()),
     m_skip_last_line(false),
-    m_s3_select(0),
+    m_s3_select(nullptr),
     m_error_count(0),
     m_extract_csv_header_info(false),
     m_previous_line(false),
@@ -1377,7 +1359,7 @@ public:
   csv_object(s3select* s3_query, struct csv_defintions csv) :
     base_s3object(s3_query->get_scratch_area()),
     m_skip_last_line(false),
-    m_s3_select(0),
+    m_s3_select(nullptr),
     m_error_count(0),
     m_extract_csv_header_info(false),
     m_previous_line(false),
@@ -1390,9 +1372,9 @@ public:
   }
 
   csv_object():
-    base_s3object(0),
+    base_s3object(nullptr),
     m_skip_last_line(false),
-    m_s3_select(0),
+    m_s3_select(nullptr),
     m_error_count(0),
     m_extract_csv_header_info(false),
     m_previous_line(false),
@@ -1408,7 +1390,6 @@ private:
   bool m_aggr_flow = false; //TODO once per query
   bool m_is_to_aggregate;
   bool m_skip_last_line;
-  size_t m_stream_length;
   std::string m_error_description;
   char* m_stream;
   char* m_end_stream;
@@ -1480,7 +1461,7 @@ public:
     return m_error_description;
   }
 
-  virtual ~csv_object() {}
+  virtual ~csv_object() = default;
 
 public:
 
@@ -1499,7 +1480,7 @@ public:
         if (number_of_tokens < 0) //end of stream
         {
           if (m_is_to_aggregate)
-            for (auto i : m_projections)
+            for (auto& i : m_projections)
             {
               i->set_last_call();
               result.append( i->eval().to_string() );
@@ -1516,7 +1497,7 @@ public:
         }
 
         m_sa->update(m_row_tokens, number_of_tokens);
-        for (auto a : *m_s3_select->get_aliases()->get())
+        for (auto& a : *m_s3_select->get_aliases()->get())
         {
           a.second->invalidate_cache_result();
         }
@@ -1528,7 +1509,7 @@ public:
           }
 
       }
-      while (1);
+      while (true);
     }
     else
     {
@@ -1543,7 +1524,7 @@ public:
         }
 
         m_sa->update(m_row_tokens, number_of_tokens);
-        for (auto a : *m_s3_select->get_aliases()->get())
+        for (auto& a : *m_s3_select->get_aliases()->get())
         {
           a.second->invalidate_cache_result();
         }
@@ -1551,7 +1532,7 @@ public:
       }
       while (m_where_clause && m_where_clause->eval().i64() == false);
 
-      for (auto i : m_projections)
+      for (auto& i : m_projections)
       {
         result.append( i->eval().to_string() );
         result.append(",");
@@ -1620,9 +1601,7 @@ private:
   {
     //purpose: the cv data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
     //for later, upon next chunk of data is streaming, the stored-line is merge with current broken-line, and processed.
-    int status;
     std::string tmp_buff;
-    u_int32_t skip_last_bytes = 0;
     m_processed_bytes += stream_length;
 
     m_skip_first_line = false;
@@ -1641,7 +1620,7 @@ private:
       m_previous_line = false;
       m_skip_first_line = true;
 
-      status = run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
+      run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
     }
 
     if (csv_stream[stream_length - 1] != m_csv_defintion.row_delimiter)
@@ -1653,16 +1632,15 @@ private:
         p_obj_chunk--;  //scan until end-of previous line in chunk
       }
 
-      skip_last_bytes = (&(csv_stream[stream_length - 1]) - p_obj_chunk);
+      u_int32_t skip_last_bytes = (&(csv_stream[stream_length - 1]) - p_obj_chunk);
       m_last_line.assign(p_obj_chunk + 1, p_obj_chunk + 1 + skip_last_bytes); //save it for next chunk
 
       m_previous_line = true;//it means to skip last line
 
     }
 
-    status = run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
+    return run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
 
-    return status;
   }
 
 public:
@@ -1674,8 +1652,6 @@ public:
     m_end_stream = (char*)csv_stream + stream_length;
     m_is_to_aggregate = do_aggregate;
     m_skip_last_line = skip_last_line;
-
-    m_stream_length = stream_length;
 
     if(m_extract_csv_header_info == false)
     {
@@ -1716,7 +1692,7 @@ public:
       }
 
     }
-    while (1);
+    while (true);
 
     return 0;
   }

@@ -921,7 +921,7 @@ protected:
   int m_eval_stack_depth;
 
 public:
-  base_statement():m_scratch(0), is_last_call(false), m_is_cache_result(false), m_projection_alias(0), m_eval_stack_depth(0) {}
+  base_statement():m_scratch(nullptr), is_last_call(false), m_is_cache_result(false), m_projection_alias(nullptr), m_eval_stack_depth(0) {}
   virtual value& eval() =0;
   virtual base_statement* left()
   {
