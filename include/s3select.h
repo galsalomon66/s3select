@@ -30,19 +30,6 @@ private:
   std::vector<base_statement*> m_projections;
 
 public:
-  bool is_aggregate()
-  {
-    //TODO iterate on projections , and search for aggregate
-    //for(auto p : m_projections){}
-
-    return false;
-  }
-
-  bool semantic()
-  {
-    //TODO check aggragtion function are not nested
-    return false;
-  }
 
   std::vector<base_statement*>* get()
   {
@@ -71,7 +58,6 @@ struct actionQ
   std::vector<std::string> trimTypeQ;
   projection_alias alias_map;
   std::string from_clause;
-  std::vector<std::string> schema_columns;
   s3select_projections  projections;
 
   uint64_t in_set_count;
@@ -80,7 +66,7 @@ struct actionQ
 
   actionQ():in_set_count(0), when_than_count(0){}
 
-  std::map<void*,std::vector<char*> *> x_map;
+  std::map<const void*,std::vector<const char*> *> x_map;
 
   ~actionQ()
   {
@@ -88,20 +74,20 @@ struct actionQ
       delete m.second;
   }
   
-  bool is_already_scanned(void *th,char *a)
+  bool is_already_scanned(const void *th,const char *a)
   {
     //purpose: caller get indication in the case a specific builder is scan more than once the same text(pointer)
     auto t = x_map.find(th);
 
     if(t == x_map.end())
     {
-      auto v = new std::vector<char*>;//TODO delete 
-      x_map.insert(std::pair<void*,std::vector<char*> *>(th,v));
+      auto v = new std::vector<const char*>;//TODO delete 
+      x_map.insert(std::pair<const void*,std::vector<const char*> *>(th,v));
       v->push_back(a);
     }
     else
     {
-      for( auto c : *(t->second) )
+      for(auto& c : *(t->second))
       {
         if( strcmp(c,a) == 0)
           return true;
@@ -383,34 +369,42 @@ public:
 
   int semantic()
   {
-    for (const auto& e : get_projections_list())
+    for (const auto &e : get_projections_list())
     {
-      base_statement* aggr;
-
-      if ((aggr = e->get_aggregate()) != nullptr)
+      e->resolve_node();
+      //upon validate there is no aggregation-function nested calls, it validates legit aggregation call. 
+      if (e->is_nested_aggregate(aggr_flow))
       {
-        if (aggr->is_nested_aggregate(aggr))
-        {
-          error_description = "nested aggregation function is illegal i.e. sum(...sum ...)";
-          throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
-        }
-
-        aggr_flow = true;
+        error_description = "nested aggregation function is illegal i.e. sum(...sum ...)";
+        throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
       }
     }
 
     if (aggr_flow == true)
-      for (const auto& e : get_projections_list())
+    {// atleast one projection column contain aggregation function
+      for (const auto &e : get_projections_list())
       {
-        auto skip_expr = e->get_aggregate();
+        auto aggregate_expr = e->get_aggregate();
 
-        if (e->is_binop_aggregate_and_column(skip_expr))
+        if (aggregate_expr)
         {
-          error_description = "illegal expression. /select sum(c1) + c1 ..../ is not allow type of query";
-          throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
+          //per each column, subtree is mark to skip except for the aggregation function subtree. 
+          //for an example: substring( ... , sum() , count() ) :: the substring is mark to skip execution, while sum and count not.
+          e->set_skip_non_aggregate(true);
+          e->mark_aggreagtion_subtree_to_execute();
         }
+        else
+        {
+          //in case projection column is not aggregate, the projection column must *not* contain reference to columns.
+          if(e->is_column_reference())
+          {
+            error_description = "illegal query; projection contains aggregation function is not allowed with projection contains column reference";
+            throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
+          }
+        }
+        
       }
-
+    }
     return 0;
   }
 
@@ -1447,7 +1441,7 @@ public:
       m_where_clause->traverse_and_apply(m_sa, m_s3_select->get_aliases());
     }
 
-    for (auto p : m_projections)
+    for (auto& p : m_projections)
     {
       p->traverse_and_apply(m_sa, m_s3_select->get_aliases());
     }
@@ -1483,6 +1477,7 @@ public:
             for (auto& i : m_projections)
             {
               i->set_last_call();
+              i->set_skip_non_aggregate(false);//projection column is set to be runnable
               result.append( i->eval().to_string() );
               result.append(",");
             }

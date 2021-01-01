@@ -2347,6 +2347,32 @@ TEST(TestS3selectFunctions, trim11)
 }
 
 
+TEST(TestS3selectFunctions, nested_call_aggregate_with_non_aggregate)
+{
+    //purpose: test projections with aggregation functions, in mix of nested calls. 
+    s3select s3select_syntax;
+
+    const std::string input_query = "select substring('abcdefghijklm',(2-1)*3+sum(cast(_1 as int))*0+1,(count() + count(0))/count(0)) ,count(0),(sum(cast(_1 as int))*min(cast(_2 as int)))*0 from stdin;";
+
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+
+    std::string s3select_result;
+    std::string input;
+    size_t size = 128;
+    generate_rand_csv(input, size);
+
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, "de,128,0,");
+}
 
 
 

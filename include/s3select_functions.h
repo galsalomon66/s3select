@@ -146,6 +146,7 @@ private:
   base_function* m_func_impl;
   s3select_functions* m_s3select_functions;
   variable m_result;
+  bool m_is_aggregate_function;
 
   void _resolve_name()
   {
@@ -160,6 +161,7 @@ private:
       throw base_s3select_exception("function not found", base_s3select_exception::s3select_exp_en_t::FATAL);  //should abort query
     }
     m_func_impl = f;
+    m_is_aggregate_function= m_func_impl->is_aggregate();
     m_s3select_functions->push_for_cleanup(this);
     //placement new is releasing the main-buffer in which all AST nodes
     //allocating from it. meaning no calls to destructors.
@@ -183,40 +185,88 @@ public:
     }
   }
 
-  virtual bool is_aggregate() // TODO under semantic flow
-  {
-    _resolve_name();
-
-    return m_func_impl->is_aggregate();
+  void set_last_call() override
+  {//it cover the use-case where aggregation function is an argument in non-aggregate function.
+    is_last_call = true;
+    for (auto& ba : arguments)
+    {
+      ba->set_last_call();
+    }
   }
 
-  virtual bool semantic()
+  void set_skip_non_aggregate(bool skip_non_aggregate_op) override
+  {//it cover the use-case where aggregation function is an argument in non-aggregate function.
+    m_skip_non_aggregate_op = skip_non_aggregate_op;
+    for (auto& ba : arguments)
+    {
+      ba->set_skip_non_aggregate(m_skip_non_aggregate_op);
+    }
+  }
+
+  bool is_aggregate() const override
+  {
+    //_resolve_name();
+    //return m_func_impl->is_aggregate();
+    
+    return m_is_aggregate_function;
+  }
+
+  bool semantic() override
   {
     return true;
   }
 
-  __function(const char* fname, s3select_functions* s3f) : name(fname), m_func_impl(0), m_s3select_functions(s3f) {}
+  __function(const char* fname, s3select_functions* s3f) : name(fname), m_func_impl(nullptr), m_s3select_functions(s3f),m_is_aggregate_function(false) 
+  {}
 
-  virtual value& eval()
+  value& eval() override
+  {
+    return eval_internal();
+  }
+
+  value& eval_internal() override
   {
 
-    _resolve_name();
+    _resolve_name();//node is "resolved" (function is created) upon first call/first row.
 
     if (is_last_call == false)
-    {
-      (*m_func_impl)(&arguments, &m_result);
+    {//all rows prior to last row
+      if(m_skip_non_aggregate_op == false || is_aggregate() == true)
+      {
+        (*m_func_impl)(&arguments, &m_result);
+      }
+      else if(m_skip_non_aggregate_op == true)
+      {
+        for(auto& p : arguments)
+        {//evaluating the arguments (not the function itself, which is a non-aggregate function)
+	 //i.e. in the following use case substring( , sum(),count() ) ; only sum() and count() are evaluated.
+          p->eval();
+        }
+      }
     }
     else
-    {
-      (*m_func_impl).get_aggregate_result(&m_result);
+    {//on the last row, the aggregate function is finalized, 
+     //and non-aggregate function is evaluated with the result of aggregate function.
+      if(is_aggregate())
+        (*m_func_impl).get_aggregate_result(&m_result);
+      else
+        (*m_func_impl)(&arguments, &m_result);
     }
 
     return m_result.get_value();
   }
 
+  void resolve_node() override
+  {
+    _resolve_name();
 
+    for (auto& arg : arguments)
+    {
+      arg->resolve_node();
+    }
+  }
 
-  virtual std::string  print(int ident)
+  std::string  print(int ident) override
   {
     return std::string(0);
   }
@@ -232,7 +282,7 @@ public:
     return arguments;
   }
 
-  virtual ~__function() {}
+  virtual ~__function() = default;
 };
 
 
@@ -257,9 +307,9 @@ struct _fn_add : public base_function
 
   value var_result;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     base_statement* x =  *iter;
     iter++;
     base_statement* y = *iter;
@@ -282,9 +332,9 @@ struct _fn_sum : public base_function
     aggregate = true;
   }
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     base_statement* x = *iter;
 
     try
@@ -319,7 +369,7 @@ struct _fn_count : public base_function
     aggregate=true;
   }
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     count += 1;
 
@@ -341,9 +391,9 @@ struct _fn_avg : public base_function
 
     _fn_avg() : sum(0) { aggregate = true; }
 
-    bool operator()(bs_stmt_vec_t* args, variable *result)
+    bool operator()(bs_stmt_vec_t* args, variable *result) override
     {
-        bs_stmt_vec_t::iterator iter = args->begin();
+        auto iter = args->begin();
         base_statement *x = *iter;
 
         try
@@ -379,9 +429,9 @@ struct _fn_min : public base_function
     aggregate=true;
   }
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     base_statement* x =  *iter;
 
     if(min > x->eval())
@@ -409,9 +459,9 @@ struct _fn_max : public base_function
     aggregate=true;
   }
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     base_statement* x =  *iter;
 
     if(max < x->eval())
@@ -435,7 +485,7 @@ struct _fn_to_int : public base_function
   value var_result;
   value func_arg;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     char* perr;
     int64_t i=0;
@@ -478,7 +528,7 @@ struct _fn_to_float : public base_function
   value var_result;
   value v_from;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     char* perr;
     double d=0;
@@ -569,14 +619,14 @@ struct _fn_to_timestamp : public base_function
     return true;
   }
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
 
     hr = 0;
     mn = 0;
     sc = 0;
 
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     int args_size = args->size();
 
     if (args_size != 1)
@@ -617,9 +667,9 @@ struct _fn_extact_from_timestamp : public base_function
 
   value val_date_part;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     int args_size = args->size();
 
     if (args_size < 2)
@@ -680,9 +730,9 @@ struct _fn_diff_timestamp : public base_function
   value val_dt1;
   value val_dt2;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     int args_size = args->size();
 
     if (args_size < 3)
@@ -752,9 +802,9 @@ struct _fn_add_to_timestamp : public base_function
   value val_quantity;
   value val_timestamp;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     int args_size = args->size();
 
     if (args_size < 3)
@@ -820,7 +870,7 @@ struct _fn_utcnow : public base_function
 
   boost::posix_time::ptime now_ptime;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     int args_size = args->size();
 
@@ -841,7 +891,7 @@ struct _fn_between : public base_function
 
   value res;
   
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     int args_size = args->size();
 
@@ -851,7 +901,7 @@ struct _fn_between : public base_function
       throw base_s3select_exception("between operates on 3 expressions");//TODO FATAL
     }
 
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
 
     base_statement* second_expr = *iter;
     iter++;    
@@ -880,7 +930,7 @@ static char s3select_ver[10]="41.a";
 struct _fn_version : public base_function
 {
   value val; //TODO use git to generate sha1
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     val = &s3select_ver[0];
     *result = val;
@@ -893,9 +943,9 @@ struct _fn_isnull : public base_function
 
   value res;
   
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     base_statement* expr = *iter;
     value expr_val = expr->eval();
     if ( expr_val.is_null()) {
@@ -912,9 +962,9 @@ struct _fn_in : public base_function
 
   value res;
 
-  bool operator()(bs_stmt_vec_t *args, variable *result)
+  bool operator()(bs_stmt_vec_t *args, variable *result) override
   {
-    int args_size = args->size()-1;
+    int args_size = static_cast<int>(args->size()-1);
     base_statement *main_expr = (*args)[args_size];
     value main_expr_val = main_expr->eval();
     args_size--;
@@ -997,9 +1047,9 @@ struct _fn_like : public base_function
     }
   }
   
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     iter++;
     base_statement* main_expr = *iter;
     value main_expr_val = main_expr->eval();
@@ -1024,9 +1074,9 @@ struct _fn_substr : public base_function
   value v_from;
   value v_to;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
     int args_size = args->size();
 
 
@@ -1137,9 +1187,9 @@ struct _fn_charlength : public base_function {
 
     value v_str;
  
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-        bs_stmt_vec_t::iterator iter = args->begin();
+        auto iter = args->begin();
         base_statement* str =  *iter;
         v_str = str->eval();
         if(v_str.type != value::value_En_t::STRING) {
@@ -1157,9 +1207,9 @@ struct _fn_lower : public base_function {
     std::string buff;
     value v_str;
 
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-        bs_stmt_vec_t::iterator iter = args->begin();
+        auto iter = args->begin();
         base_statement* str = *iter;
         v_str = str->eval();
         if(v_str.type != value::value_En_t::STRING) {
@@ -1178,9 +1228,9 @@ struct _fn_upper : public base_function {
     std::string buff;
     value v_str;
 
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-        bs_stmt_vec_t::iterator iter = args->begin();
+        auto iter = args->begin();
         base_statement* str = *iter;
         v_str = str->eval();
         if(v_str.type != value::value_En_t::STRING) {
@@ -1199,9 +1249,9 @@ struct _fn_nullif : public base_function {
     value x;
     value y;
 
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-        bs_stmt_vec_t::iterator iter = args->begin();
+        auto iter = args->begin();
 
         int args_size = args->size();
         if (args_size != 2)
@@ -1240,11 +1290,11 @@ struct _fn_nullif : public base_function {
 
 struct _fn_when_than : public base_function {
 
-  value when_value,than_value;
+  value when_value;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
 
     base_statement* than_expr = *iter;
     iter ++;
@@ -1269,7 +1319,7 @@ struct _fn_case_when_else : public base_function {
 
   value when_than_value;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     base_statement* else_expr = *(args->begin());
 
@@ -1297,9 +1347,9 @@ struct _fn_coalesce : public base_function
 
   value res;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter_begin = args->begin();
+    auto iter_begin = args->begin();
     int args_size = args->size();
     while (args_size >= 1)
     {
@@ -1322,9 +1372,9 @@ struct _fn_string : public base_function
 
   value res;
 
-  bool operator()(bs_stmt_vec_t* args, variable* result)
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    bs_stmt_vec_t::iterator iter = args->begin();
+    auto iter = args->begin();
 
     base_statement* expr = *iter;
     value expr_val = expr->eval();
@@ -1344,9 +1394,9 @@ struct _fn_trim : public base_function {
     	v_remove = " "; 
     }
 
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-    	bs_stmt_vec_t::iterator iter = args->begin();
+    	auto iter = args->begin();
     	int args_size = args->size();
     	base_statement* str = *iter;
         v_input = str->eval();
@@ -1377,9 +1427,9 @@ struct _fn_leading : public base_function {
     	v_remove = " "; 
     }
 
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-    	bs_stmt_vec_t::iterator iter = args->begin();
+    	auto iter = args->begin();
     	int args_size = args->size();
     	base_statement* str = *iter;
         v_input = str->eval();
@@ -1409,9 +1459,9 @@ struct _fn_trailing : public base_function {
     	v_remove = " "; 
     }
 
-    bool operator()(bs_stmt_vec_t* args, variable* result)
+    bool operator()(bs_stmt_vec_t* args, variable* result) override
     {
-    	bs_stmt_vec_t::iterator iter = args->begin();
+    	auto iter = args->begin();
     	int args_size = args->size();
     	base_statement* str = *iter;
         v_input = str->eval();
@@ -1568,9 +1618,9 @@ base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt
   }
 }
 
-bool base_statement::is_function()
+bool base_statement::is_function() const
 {
-  if (dynamic_cast<__function*>(this))
+  if (dynamic_cast<__function*>(const_cast<base_statement*>(this)))
   {
     return true;
   }
@@ -1580,39 +1630,10 @@ bool base_statement::is_function()
   }
 }
 
-bool base_statement::is_aggregate_exist_in_expression(base_statement* e) //TODO obsolete ?
-{
-  if (e->is_aggregate())
-  {
-    return true;
-  }
-
-  if (e->left() && e->left()->is_aggregate_exist_in_expression(e->left()))
-  {
-    return true;
-  }
-
-  if (e->right() && e->right()->is_aggregate_exist_in_expression(e->right()))
-  {
-    return true;
-  }
-
-  if (e->is_function())
-  {
-    for (auto i : dynamic_cast<__function*>(e)->get_arguments())
-      if (e->is_aggregate_exist_in_expression(i))
-      {
-        return true;
-      }
-  }
-
-  return false;
-}
-
-base_statement* base_statement::get_aggregate()
+const base_statement* base_statement::get_aggregate() const
 {
   //search for aggregation function in AST
-  base_statement* res = 0;
+  const base_statement* res = 0;
 
   if (is_aggregate())
   {
@@ -1631,9 +1652,9 @@ base_statement* base_statement::get_aggregate()
 
   if (is_function())
   {
-    for (auto i : dynamic_cast<__function*>(this)->get_arguments())
+    for (auto i : dynamic_cast<__function*>(const_cast<base_statement*>(this))->get_arguments())
     {
-      base_statement* b=i->get_aggregate();
+      const base_statement* b=i->get_aggregate();
       if (b)
       {
         return b;
@@ -1643,86 +1664,84 @@ base_statement* base_statement::get_aggregate()
   return 0;
 }
 
-bool base_statement::is_nested_aggregate(base_statement* e)
+bool base_statement::is_column_reference() const
 {
-  //validate for non nested calls for aggregation function, i.e. sum ( min ( ))
-  if (e->is_aggregate())
+  if(is_column())
+    return true;
+  
+  if(left() && left()->is_column_reference())
+    return true;
+
+  if(right() && right()->is_column_reference())
+    return true;
+
+  if(is_function())
   {
-    if (e->left())
+    for(auto a : dynamic_cast<__function*>(const_cast<base_statement*>(this))->get_arguments())
     {
-      if (e->left()->is_aggregate_exist_in_expression(e->left()))
-      {
+      if(a->is_column_reference())
         return true;
-      }
     }
-    else if (e->right())
-    {
-      if (e->right()->is_aggregate_exist_in_expression(e->right()))
+  }
+
+  return false;
+}
+
+bool base_statement::is_nested_aggregate(bool &aggr_flow) const
+{
+  if (is_aggregate())
+  {
+      aggr_flow=true;
+      for (auto& i : dynamic_cast<__function*>(const_cast<base_statement*>(this))->get_arguments())
       {
-        return true;
-      }
-    }
-    else if (e->is_function())
-    {
-      for (auto i : dynamic_cast<__function*>(e)->get_arguments())
-      {
-        if (i->is_aggregate_exist_in_expression(i))
+        if (i->get_aggregate() != nullptr)
         {
           return true;
         }
       }
-    }
-    return false;
   }
+
+  if(left() && left()->is_nested_aggregate(aggr_flow))
+    return true;
+  
+  if(right() && right()->is_nested_aggregate(aggr_flow))
+    return true;
+
+  if (is_function())
+  {
+      for (auto& i : dynamic_cast<__function*>(const_cast<base_statement*>(this))->get_arguments())
+      {
+        if (i->get_aggregate() != nullptr)
+        {
+          return i->is_nested_aggregate(aggr_flow);
+        }
+      }
+  }
+
   return false;
 }
 
-// select sum(c2) ... + c1 ... is not allowed. a binary operation with scalar is OK. i.e. select sum() + 1
-bool base_statement::is_binop_aggregate_and_column(base_statement* skip_expression)
-{
-  if (left() && left() != skip_expression) //can traverse to left
-  {
-    if (left()->is_column())
-    {
-      return true;
-    }
-    else if (left()->is_binop_aggregate_and_column(skip_expression) == true)
-    {
-      return true;
-    }
-  }
+bool base_statement::mark_aggreagtion_subtree_to_execute()
+{//purpase:: set aggregation subtree as runnable.
+ //the function search for aggregation function, and mark its subtree {skip = false}
+  if (is_aggregate())
+    set_skip_non_aggregate(false);
+  
+  if (left())
+    left()->mark_aggreagtion_subtree_to_execute();
+  
+  if(right())
+    right()->mark_aggreagtion_subtree_to_execute();
 
-  if (right() && right() != skip_expression) //can traverse right
+  if (is_function())
   {
-    if (right()->is_column())
-    {
-      return true;
-    }
-    else if (right()->is_binop_aggregate_and_column(skip_expression) == true)
-    {
-      return true;
-    }
-  }
-
-  if (this != skip_expression && is_function())
-  {
-
-    __function* f = (dynamic_cast<__function*>(this));
-    bs_stmt_vec_t l = f->get_arguments();
-    for (auto i : l)
-    {
-      if (i!=skip_expression && i->is_column())
+      for (auto& i : dynamic_cast<__function*>(this)->get_arguments())
       {
-        return true;
+          i->mark_aggreagtion_subtree_to_execute();
       }
-      if (i->is_binop_aggregate_and_column(skip_expression) == true)
-      {
-        return true;
-      }
-    }
   }
 
-  return false;
+  return true;
 }
 
 } //namespace s3selectEngine

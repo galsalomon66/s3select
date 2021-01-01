@@ -6,8 +6,9 @@
 #include <list>
 #include <map>
 #include <vector>
-#include <string.h>
-#include <math.h>
+#include <algorithm>
+#include <cstring>
+#include <cmath>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -30,7 +31,6 @@ class ChunkAllocator : public std::allocator<T>
 public:
   typedef size_t size_type;
   typedef T* pointer;
-  typedef const T* const_pointer;
   size_t buffer_capacity;
   char* buffer_ptr;
 
@@ -64,7 +64,7 @@ public:
   }
 
   //==================================
-  inline pointer allocate(size_type n, const void* hint = 0)
+  inline pointer allocate(size_type n,  [[maybe_unused]] const void* hint = 0)
   {
     return (_Allocate(n, (pointer)0));
   }
@@ -75,7 +75,7 @@ public:
   }
 
   //==================================
-  ChunkAllocator() throw() : std::allocator<T>()
+  ChunkAllocator() noexcept : std::allocator<T>()
   {
     // alloc from main-buffer
     buffer_capacity = 0;
@@ -84,7 +84,7 @@ public:
   }
 
   //==================================
-  ChunkAllocator(const ChunkAllocator& other) throw() : std::allocator<T>(other)
+  ChunkAllocator(const ChunkAllocator& other) noexcept : std::allocator<T>(other)
   {
     // copy const
     buffer_capacity = 0;
@@ -92,7 +92,7 @@ public:
   }
 
   //==================================
-  ~ChunkAllocator() throw()
+  ~ChunkAllocator() noexcept
   {
     //do nothing
   }
@@ -120,7 +120,7 @@ private:
 
 public:
   std::string _msg;
-  base_s3select_exception(const char* n) : m_severity(s3select_exp_en_t::NONE)
+  explicit base_s3select_exception(const char* n) : m_severity(s3select_exp_en_t::NONE)
   {
     _msg.assign(n);
   }
@@ -143,7 +143,7 @@ public:
     return m_severity;
   }
 
-  virtual ~base_s3select_exception() {}
+  virtual ~base_s3select_exception() = default;
 };
 
 
@@ -229,18 +229,8 @@ public:
 
   void update(std::vector<char*>& tokens, size_t num_of_tokens)
   {
-    size_t i=0;
-    for(auto s : tokens)
-    {
-      if (i>=num_of_tokens)
-      {
-        break;
-      }
-
-      m_columns[i++] = s;
-    }
-    m_upper_bound = i;
-
+    std::copy_n(tokens.begin(), num_of_tokens, m_columns.begin());
+    m_upper_bound = num_of_tokens;
   }
 
   int get_column_pos(const char* n)
@@ -919,15 +909,43 @@ protected:
   value m_alias_result;
   base_statement* m_projection_alias;
   int m_eval_stack_depth;
+  bool m_skip_non_aggregate_op;
+  value value_na;
 
 public:
-  base_statement():m_scratch(nullptr), is_last_call(false), m_is_cache_result(false), m_projection_alias(nullptr), m_eval_stack_depth(0) {}
-  virtual value& eval() =0;
-  virtual base_statement* left()
+  base_statement():m_scratch(nullptr), is_last_call(false), m_is_cache_result(false),
+  m_projection_alias(nullptr), m_eval_stack_depth(0), m_skip_non_aggregate_op(false) {}
+
+  virtual value& eval()
+  {
+    //purpose: on aggregation flow to run only the correct subtree(aggregation subtree)
+     
+    if (m_skip_non_aggregate_op == false)
+      return eval_internal();//not skipping this node.
+    else
+    {
+    //skipping this node.
+    //in case execution should skip a node, it will traverse (left and right) 
+    //and search for subtree to execute.   
+    //example: sum( ... ) - sum( ... ) ; the minus operand is skipped while sum() operand is not.
+    if(left())
+      left()->eval_internal();
+    
+    if(right())
+      right()->eval_internal();
+    
+    }
+
+    return value_na;
+  }
+
+  virtual value& eval_internal() = 0;
+  
+  virtual base_statement* left() const
   {
     return 0;
   }
-  virtual base_statement* right()
+  virtual base_statement* right() const
   {
     return 0;
   }
@@ -948,20 +966,47 @@ public:
     }
   }
 
-  virtual bool is_aggregate()
+  virtual void set_skip_non_aggregate(bool skip_non_aggregate_op)
   {
-    return false;
+    m_skip_non_aggregate_op = skip_non_aggregate_op;
+
+    if (left())
+    {
+      left()->set_skip_non_aggregate(m_skip_non_aggregate_op);
+    }
+    if (right())
+    {
+      right()->set_skip_non_aggregate(m_skip_non_aggregate_op);
+    }
   }
-  virtual bool is_column()
+
+  virtual bool is_aggregate() const
   {
     return false;
   }
 
-  bool is_function();
-  bool is_aggregate_exist_in_expression(base_statement* e);//TODO obsolete ?
-  base_statement* get_aggregate();
-  bool is_nested_aggregate(base_statement* e);
-  bool is_binop_aggregate_and_column(base_statement* skip);
+  virtual bool is_column() const
+  {
+    return false;
+  }
+
+  virtual void resolve_node()
+  {//part of semantic analysis(TODO maybe semantic method should handle this)
+    if (left())
+    {
+      left()->resolve_node();
+    }
+    if (right())
+    {
+      right()->resolve_node();
+    }
+  }
+
+  bool is_function() const;
+  const base_statement* get_aggregate() const;
+  bool is_nested_aggregate(bool&) const;
+  bool is_column_reference() const;
+  bool mark_aggreagtion_subtree_to_execute();
 
   virtual void set_last_call()
   {
@@ -1142,7 +1187,7 @@ public:
 
   virtual ~variable() {}
 
-  virtual bool is_column()  //is reference to column.
+  virtual bool is_column() const //is reference to column.
   {
     if(m_var_type == var_t::VAR || m_var_type == var_t::POS)
     {
@@ -1195,7 +1240,7 @@ public:
     return var_value;
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     if (m_var_type == var_t::COL_VALUE)
     {
@@ -1294,11 +1339,11 @@ public:
     return true;
   }
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1310,7 +1355,7 @@ public:
     return std::string("#");//TBD
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
 
     switch (_cmp)
@@ -1376,11 +1421,11 @@ private:
 
 public:
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1409,7 +1454,7 @@ public:
     //return out;
     return std::string("#");//TBD
   }
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     bool res;
     if (!l || !r)
@@ -1466,11 +1511,11 @@ private:
 
 public:
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1487,7 +1532,7 @@ public:
     return std::string("#");//TBD
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     switch (_mulldiv)
     {
@@ -1539,11 +1584,11 @@ private:
 
 public:
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1563,7 +1608,7 @@ public:
     return std::string("#");//TBD
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     if (_op == addsub_op_t::NA) // -num , +num , unary-operation on number
     {
@@ -1612,12 +1657,12 @@ class negate_function_operation : public base_statement
     return true;
   }
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return function_to_negate;
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     res = function_to_negate->eval();
 
@@ -1649,13 +1694,13 @@ public:
   // validate semantic on creation instead on run-time
   virtual bool operator()(bs_stmt_vec_t* args, variable* result) = 0;
   base_function() : aggregate(false) {}
-  bool is_aggregate()
+  bool is_aggregate() const
   {
     return aggregate == true;
   }
   virtual void get_aggregate_result(variable*) {}
 
-  virtual ~base_function() {}
+  virtual ~base_function() = default;
   
   virtual void dtor()
   {//release function-body implementation 
