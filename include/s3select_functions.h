@@ -53,6 +53,7 @@ enum class s3select_func_En_t {ADD,
                                NULLIF,
                                BETWEEN,
                                IS_NULL,
+                               IS_NOT_NULL,
                                IN,
                                LIKE,
                                VERSION,
@@ -98,6 +99,7 @@ private:
     {"nullif", s3select_func_En_t::NULLIF},
     {"#between#", s3select_func_En_t::BETWEEN},
     {"#is_null#", s3select_func_En_t::IS_NULL},
+    {"#is_not_null#", s3select_func_En_t::IS_NOT_NULL},
     {"#in_predicate#", s3select_func_En_t::IN},
     {"#like_predicate#", s3select_func_En_t::LIKE},
     {"version", s3select_func_En_t::VERSION},
@@ -205,9 +207,6 @@ public:
 
   bool is_aggregate() const override
   {
-    //_resolve_name();
-    //return m_func_impl->is_aggregate();
-    
     return m_is_aggregate_function;
   }
 
@@ -957,6 +956,25 @@ struct _fn_isnull : public base_function
   }
 };
 
+struct _fn_is_not_null : public base_function
+{
+  value res;
+  _fn_isnull isnull_op;
+
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
+  {
+   
+    isnull_op(args,result);
+ 
+    if (result->get_value().is_true() == 0)
+      result->set_value(true);
+    else
+      result->set_value(false);
+
+    return true;
+  } 
+};
+
 struct _fn_in : public base_function
 {
 
@@ -1135,7 +1153,8 @@ struct _fn_substr : public base_function
 
     if (f>str_length)
     {
-      throw base_s3select_exception("substr start position is too far");  //can skip row
+    result->set_value("");
+    return true;
     }
 
     if (str_length>(int)sizeof(buff))
@@ -1154,10 +1173,15 @@ struct _fn_substr : public base_function
         t = v_to.i64();
       }
 
-      if ( f <= 0)
+      if (f <= 0)
       {
         t = t + f - 1;
         f = 1;
+      }
+
+      if (t<0)
+      {
+        t = 0;
       }
 
       if (t > str_length)
@@ -1166,8 +1190,8 @@ struct _fn_substr : public base_function
       }
 
       if( (str_length-(f-1)-t) <0)
-      {
-        throw base_s3select_exception("substr length parameter beyond bounderies");  //can skip row
+      {//in case the requested length is too long, reduce it to exact length.
+        t = str_length-(f-1);
       }
 
       strncpy(buff, v_str.str()+f-1, t);
@@ -1303,7 +1327,7 @@ struct _fn_when_than : public base_function {
 
     when_value = when_expr->eval();
     
-    if (when_value.i64())//true
+    if (when_value.is_true())//true
     {
         *result = than_expr->eval();
         return true;
@@ -1569,6 +1593,10 @@ base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt
     return S3SELECT_NEW(this,_fn_isnull);
     break;
 
+  case s3select_func_En_t::IS_NOT_NULL:
+    return S3SELECT_NEW(this,_fn_is_not_null);
+    break;
+
   case s3select_func_En_t::IN:
     return S3SELECT_NEW(this,_fn_in);
     break;
@@ -1669,11 +1697,11 @@ bool base_statement::is_column_reference() const
   if(is_column())
     return true;
   
-  if(left() && left()->is_column_reference())
-    return true;
+  if(left())
+    return left()->is_column_reference();
 
-  if(right() && right()->is_column_reference())
-    return true;
+  if(right())
+    return right()->is_column_reference();
 
   if(is_function())
   {

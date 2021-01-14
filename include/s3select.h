@@ -547,9 +547,11 @@ public:
 
       arithmetic_predicate = (special_predicates) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
 
-      special_predicates = (is_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
+      special_predicates = (is_null) | (is_not_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
 
-      is_null = (arithmetic_expression >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+      is_null = ((arithmetic_expression|factor) >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+
+      is_not_null = ((arithmetic_expression|factor) >> bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
 
       between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
 
@@ -903,10 +905,29 @@ void push_logical_predicate::builder(s3select* self, const char* a, const char* 
     tr = self->getAction()->condQ.back();
     self->getAction()->condQ.pop_back();
   }
+  else if(self->getAction()->exprQ.empty() == false)
+  {
+    tr = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  }  
+  else 
+  {//should reject by syntax parser
+    throw base_s3select_exception(std::string("missing right operand for logical expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
   if (self->getAction()->condQ.empty() == false)
   {
     tl = self->getAction()->condQ.back();
     self->getAction()->condQ.pop_back();
+  }
+  else if(self->getAction()->exprQ.empty() == false)
+  {
+    tl = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  } 
+  else 
+  {//should reject by syntax parser
+    throw base_s3select_exception(std::string("missing left operand for logical expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
   }
 
   logical_operand* f = S3SELECT_NEW(self, logical_operand, tl, oplog, tr);
@@ -1083,16 +1104,38 @@ void push_like_predicate::builder(s3select* self, const char* a, const char* b) 
 
 void push_is_null_predicate::builder(s3select* self, const char* a, const char* b) const
 {
-    //expression is null 
+    //expression is null, is not null 
   std::string token(a, b);
-      
+  bool is_null = true;
+
+  for(int i=0;i<token.size();i++)
+  {//TODO use other scan rules
+    bsc::parse_info<> info = bsc::parse(token.c_str()+i, (bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null")) , bsc::space_p);
+    if (info.full)
+      is_null = false;
+  }
+
   std::string in_function("#is_null#");
+
+  if (is_null == false)
+  {
+    in_function = "#is_not_null#";
+  }
 
   __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
 
-  base_statement* expr = self->getAction()->exprQ.back();
-  self->getAction()->exprQ.pop_back();
-  func->push_argument(expr);
+  if (!self->getAction()->exprQ.empty())
+  {
+    base_statement* expr = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+    func->push_argument(expr);
+  }
+  else if (!self->getAction()->condQ.empty())
+  {
+    base_statement* expr = self->getAction()->condQ.back();
+    self->getAction()->condQ.pop_back();
+    func->push_argument(expr);
+  }
 
   self->getAction()->condQ.push_back(func);
 }
@@ -1497,7 +1540,7 @@ public:
           a.second->invalidate_cache_result();
         }
 
-        if (!m_where_clause || m_where_clause->eval().i64() == true)
+        if (!m_where_clause || m_where_clause->eval().is_true())
           for (auto i : m_projections)
           {
             i->eval();
@@ -1525,7 +1568,7 @@ public:
         }
 
       }
-      while (m_where_clause && m_where_clause->eval().i64() == false);
+      while (m_where_clause && !m_where_clause->eval().is_true());
 
       for (auto& i : m_projections)
       {
@@ -1675,7 +1718,7 @@ public:
         std::cout << e.what() << std::endl;
         m_error_description = e.what();
         m_error_count ++;
-        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100)//abort query execution
+        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100 || (m_stream>=m_end_stream))//abort query execution
         {
           return -1;
         }

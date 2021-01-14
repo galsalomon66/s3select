@@ -505,6 +505,11 @@ public:
     return type == value_En_t::S3NAN; 
   }
 
+  bool is_true()
+  {
+    return (i64()!=0 && !is_null());
+  }
+
   void set_nan() 
   {
     __val.dbl = NAN;
@@ -666,10 +671,10 @@ public:
       return *timestamp() < *(v.timestamp());
     }
 
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    if(is_nan() || v.is_nan())
     {
       return false;
-    }
+    } 
 
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
   }
@@ -715,7 +720,7 @@ public:
       return *timestamp() > *(v.timestamp());
     }
 
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    if(is_nan() || v.is_nan())
     {
       return false;
     }
@@ -765,38 +770,38 @@ public:
       return *timestamp() == *(v.timestamp());
     }
 
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    if (is_nan() || v.is_nan())
     {
       return false;
-    }
+    }  
 
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
   }
   bool operator<=(const value& v)
-  {
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+  { 
+    if (is_nan() || v.is_nan()) {
       return false;
-    } else {
+    } else { 
       return !(*this>v);
     } 
   }
   
   bool operator>=(const value& v)
-  {
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+  { 
+    if (is_nan() || v.is_nan()) {
       return false;
-    } else {
+    } else { 
       return !(*this<v);
     } 
   }
   
   bool operator!=(const value& v)
-  {
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+  { 
+    if (is_nan() || v.is_nan()) {
       return true;
-    } else {
+    } else { 
       return !(*this == v);
-      } 
+    }
   }
   
   template<typename binop> //conversion rules for arithmetical binary operations
@@ -842,10 +847,11 @@ public:
     }
   }
     
-    if ((l.is_null() || r.is_null()) || (l.is_nan() || r.is_nan()))
+    if (l.is_null() || r.is_null()) 
     {
+      l.setnull();
+    } else if(l.is_nan() || r.is_nan()) {
       l.set_nan();
-      return l;
     }
 
     return l;
@@ -875,7 +881,7 @@ public:
   value& operator/(value& v)
   {
     if (v.is_null() || this->is_null()) {
-      v.set_nan();
+      v.setnull();
       return v;
     } else {
       return compute<binop_div>(*this, v);
@@ -1298,6 +1304,9 @@ public:
     else
     {
       var_value = (char*)m_scratch->get_column_value(column_pos).data();  //no allocation. returning pointer of allocated space
+      //in the case of successive column-delimiter {1,some_data,,3}=> third column is NULL 
+      if (*var_value.str()== 0)
+          var_value.setnull();
     }
 
     return var_value;
@@ -1357,7 +1366,14 @@ public:
 
   virtual value& eval_internal()
   {
-
+    if ((l->eval()).is_null()) {
+        var_value.setnull();
+        return var_value;
+      } else if((r->eval()).is_null()) {
+        var_value.setnull();
+        return var_value;
+      }
+    
     switch (_cmp)
     {
     case cmp_t::EQ:
@@ -1464,33 +1480,44 @@ public:
     value a = l->eval();
     if (_oplog == oplog_t::AND)
     {
-      if (a.i64() == false)
-      {
+      if (!a.is_null() && a.i64() == false) {
         res = false ^ negation_result;
         return var_value = res;
       } 
       value b = r->eval();
-      if (a.is_null() || b.is_null()) {
-        var_value.setnull();
+      if(!b.is_null() && b.i64() == false) {
+        res = false ^ negation_result;
+        return var_value = res;
       } else {
-        res =  (a.i64() && b.i64()) ^ negation_result ;
-      }
+        if (a.is_null() || b.is_null()) {
+          var_value.setnull();
+          return var_value;
+        } else {
+          res =  true ^ negation_result ;
+          return var_value =res;
+        }
+      }   
     }
     else
     {
-      if (a.i64() == true)
-      {
+      if (a.is_true()) {
         res = true ^ negation_result;
         return var_value = res;
-      }
+      } 
       value b = r->eval();
-      if (a.is_null() || b.is_null()) {
-        var_value.setnull();
+      if(b.is_true() == true) {
+        res = true ^ negation_result;
+        return var_value = res;
       } else {
-        res =  (a.i64() || b.i64()) ^ negation_result;
+        if (a.is_null() || b.is_null()) {
+          var_value.setnull();
+          return var_value;
+        } else {
+          res =  false ^ negation_result ;
+          return var_value =res;
+        }
       }
     }
-    return var_value = res;
   }
 };
 
@@ -1668,7 +1695,7 @@ class negate_function_operation : public base_statement
 
     if (res.is_number())//TODO is integer type
     {
-      if (res.i64() == 1)
+      if (res.is_true())
       {
         res = (int64_t)0;
       }
