@@ -680,7 +680,7 @@ struct _fn_diff_timestamp : public base_function
     {
       boost::gregorian::date_period dp =
         boost::gregorian::date_period( val_dt1.timestamp()->date(), val_dt2.timestamp()->date());
-      result->set_value( dp.length().days() );
+      result->set_value( (int64_t) dp.length().days() );
     }
     else if (strcmp(val_date_part.str(), "hours") == 0)
     {
