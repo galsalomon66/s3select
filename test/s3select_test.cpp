@@ -1926,13 +1926,13 @@ TEST(TestS3selectFunctions, mix)
     ASSERT_EQ(s3select_result, std::string("true,\n"));
 }
 
-TEST(TestS3selectFunctions, case_when_than_else)
+TEST(TestS3selectFunctions, case_when_then_else)
 {
     s3select s3select_syntax;
-    const std::string input_query = "select  case when (1+1+1*1==(2+1)*3)  than \"case_1_1\" \
-              when ((4*3)==(12)) than \"case_1_2\" else \"case_else_1\" end , \
-               case when 1+1*7==(2+1)*3  than \"case_2_1\" \
-              when ((4*3)==(12)+1) than \"case_2_2\" else \"case_else_2\" end from stdin where (3*3==9);" ;
+    const std::string input_query = "select  case when (1+1+1*1==(2+1)*3)  then \"case_1_1\" \
+              when ((4*3)==(12)) then \"case_1_2\" else \"case_else_1\" end , \
+               case when 1+1*7==(2+1)*3  then \"case_2_1\" \
+              when ((4*3)==(12)+1) then \"case_2_2\" else \"case_else_2\" end from stdin where (3*3==9);" ;
 
     auto status = s3select_syntax.parse_query(input_query.c_str());
     ASSERT_EQ(status, 0);
@@ -1948,6 +1948,82 @@ TEST(TestS3selectFunctions, case_when_than_else)
         ); 
     ASSERT_EQ(status, 0); 
     ASSERT_EQ(s3select_result, std::string("case_1_2,case_else_2,\n"));
+}
+
+TEST(TestS3selectFunctions, simple_case_when)
+{
+    s3select s3select_syntax;
+
+    const std::string input_query = "select  case 2+1 when (3+4) then \"case_1_1\" when 3 then \"case_3\" else \"case_else_1\" end from stdin;";
+
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 1;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0); 
+    ASSERT_EQ(s3select_result, std::string("case_3,\n"));
+}
+
+TEST(TestS3selectFunctions, nested_case)
+{
+    s3select s3select_syntax;
+
+    const std::string input_query = "select case when ((3+4) == (7 *1)) then \"case_1_1\" else \"case_2_2\" end, case 1+3 when 2+3 then \"case_1_2\" else \"case_2_1\"  end from stdin where (3*3 == 9);";
+
+    auto status = s3select_syntax.parse_query(input_query.c_str());
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 1;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), 
+        false, // dont skip first line 
+        false, // dont skip last line
+        true   // aggregate call
+        ); 
+    ASSERT_EQ(status, 0); 
+    ASSERT_EQ(s3select_result, std::string("case_1_1,case_2_1,\n"));
+}
+
+TEST(TestS3selectFunctions, case_when_condition_multiplerows)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query = "select case when cast(_3 as int)>99 and cast(_3 as int)<1000 then \"case_1_1\" else \"case_2_2\" end from s3object;";
+
+  std::string s3select_result = run_s3select(input_query,input);
+
+  const std::string input_query_2 = "select case when char_length(_3)==3 then \"case_1_1\" else \"case_2_2\" end from s3object;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result,s3select_result_2);
+}
+
+TEST(TestS3selectFunctions, case_value_multiplerows)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query = "select case cast(_1 as int) when cast(_2 as int) then \"case_1_1\" else \"case_2_2\" end from s3object;";
+
+  std::string s3select_result = run_s3select(input_query,input);
+
+  const std::string input_query_2 = "select case when cast(_1 as int) == cast(_2 as int) then \"case_1_1\" else \"case_2_2\" end from s3object;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result,s3select_result_2);
 }
 
 TEST(TestS3selectFunctions, substr11)
