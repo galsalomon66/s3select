@@ -688,6 +688,43 @@ int count_string(std::string in,std::string substr)
     return count;
 }
 
+
+void test_single_column_single_row(const char* input_query,const char* expected_result)
+{
+    s3select s3select_syntax;
+    auto status = s3select_syntax.parse_query(input_query);
+    ASSERT_EQ(status, 0);
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
+    std::string s3select_result;
+    std::string input;
+    size_t size = 1;
+    generate_csv(input, size);
+    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(),
+        false, // dont skip first line
+        false, // dont skip last line
+        true   // aggregate call
+        );
+    ASSERT_EQ(status, 0);
+    ASSERT_EQ(s3select_result, std::string(expected_result));
+}
+
+TEST(TestS3selectFunctions, syntax_1)
+{
+    //where not not (1<11) is not null;  syntax failure ; with parentheses it pass syntax i.e. /not (not (1<11)) is not null;/
+    //where not 1<11  is null; syntax failure ; with parentheses it pass syntax i.e. not (1<11) is null;
+    //where not (1); AST failure , expression result,any result implictly define true/false result
+    //where not (1+1); AST failure
+    //where not(not (1<11)) ; OK
+    //where (not (1<11)) ; OK
+    //where not (1<11) ; OK
+  test_single_column_single_row("select count(*) from stdin where not (not (1<11)) is not null;","0,");
+  test_single_column_single_row("select count(*) from stdin where ((not (1<11)) is not null);","1,");
+  test_single_column_single_row("select count(*) from stdin where not(not (1<11));","1,");
+  test_single_column_single_row("select count(*) from stdin where not (1<11);","0,");
+  test_single_column_single_row("select count(*) from stdin where 1==1 or 2==2 and 4==4 and 2==4;","1,");
+  test_single_column_single_row("select count(*) from stdin where 2==2 and 4==4 and 2==4 or 1==1;","1,");
+}
+
 TEST(TestS3selectFunctions, binop_constant)
 {
     //bug-fix for expresion with constant value on the left side(the bug change the constant values between rows)

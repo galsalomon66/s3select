@@ -54,6 +54,8 @@ struct actionQ
   std::vector<base_statement*> funcQ;
   std::vector<base_statement*> condQ;
   std::vector<base_statement*> whenThenQ;
+  std::vector<base_statement*> inPredicateQ;
+  base_statement* inMainArg;
   std::vector<std::string> dataTypeQ;
   std::vector<std::string> trimTypeQ;
   std::vector<std::string> datePartQ;
@@ -62,11 +64,10 @@ struct actionQ
   std::string from_clause;
   s3select_projections  projections;
 
-  uint64_t in_set_count;
 
   size_t when_then_count;
 
-  actionQ():in_set_count(0), when_then_count(0){}
+  actionQ(): inMainArg(0),when_then_count(0){}
 
   std::map<const void*,std::vector<const char*> *> x_map;
 
@@ -262,17 +263,17 @@ struct push_in_predicate : public base_ast_builder
 };
 static push_in_predicate g_push_in_predicate;
 
-struct push_in_predicate_counter : public base_ast_builder
+struct push_in_predicate_arguments : public base_ast_builder
 {
   void builder(s3select* self, const char* a, const char* b) const;
 };
-static push_in_predicate_counter g_push_in_predicate_counter;
+static push_in_predicate_arguments g_push_in_predicate_arguments;
 
-struct push_in_predicate_counter_start : public base_ast_builder
+struct push_in_predicate_first_arg : public base_ast_builder
 {
   void builder(s3select* self, const char* a, const char* b) const;
 };
-static push_in_predicate_counter_start g_push_in_predicate_counter_start;
+static push_in_predicate_first_arg g_push_in_predicate_first_arg;
 
 struct push_like_predicate : public base_ast_builder
 {
@@ -570,7 +571,6 @@ public:
 
       when_case_else_projection = (bsc::str_p("case")  >> (+when_stmt) >> bsc::str_p("else") >> arithmetic_expression >> bsc::str_p("end")) [BOOST_BIND_ACTION(push_case_when_else)];
 
-      // than => then
       when_stmt = (bsc::str_p("when") >> condition_expression >> bsc::str_p("then") >> arithmetic_expression)[BOOST_BIND_ACTION(push_when_condition_then)];
 
       when_case_value_when = (bsc::str_p("case") >> arithmetic_expression[BOOST_BIND_ACTION(push_case_value)]  >> 
@@ -586,25 +586,29 @@ public:
 
       where_clause = bsc::str_p("where") >> condition_expression;
 
-      condition_expression =  ( bsc::str_p("not") >> binary_condition )[BOOST_BIND_ACTION(push_negation)] | binary_condition;
+      condition_expression = arithmetic_predicate;
 
-      binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
+      arithmetic_predicate = (bsc::str_p("not") >> logical_predicate)[BOOST_BIND_ACTION(push_negation)] | logical_predicate;
 
-      arithmetic_predicate = (special_predicates) | (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+      logical_predicate =  (logical_and) >> *(or_op[BOOST_BIND_ACTION(push_logical_operator)] >> (logical_and)[BOOST_BIND_ACTION(push_logical_predicate)]);
+
+      logical_and =  (cmp_operand) >> *(and_op[BOOST_BIND_ACTION(push_logical_operator)] >> (cmp_operand)[BOOST_BIND_ACTION(push_logical_predicate)]);
+
+      cmp_operand = special_predicates | (factor) >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> (factor)[BOOST_BIND_ACTION(push_arithmetic_predicate)]);
 
       special_predicates = (is_null) | (is_not_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
 
-      is_null = ((arithmetic_expression|factor) >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+      is_null = ((factor) >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
 
-      is_not_null = ((arithmetic_expression|factor) >> bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+      is_not_null = ((factor) >> bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
 
-      between_predicate = ( arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression )[BOOST_BIND_ACTION(push_between_filter)];
+      between_predicate = (arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression)[BOOST_BIND_ACTION(push_between_filter)];
 
-      in_predicate = (arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_counter_start)] >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_counter)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_counter)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
+      in_predicate = (arithmetic_expression >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_first_arg)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_arguments)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
 
       like_predicate = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate)];
 
-      factor = (arithmetic_expression) | ('(' >> condition_expression >> ')') ;
+      factor = arithmetic_expression  | ( '(' >> arithmetic_predicate >> ')' ) ; 
 
       arithmetic_expression = (addsub_operand >> *(addsubop_operator[BOOST_BIND_ACTION(push_addsub)] >> addsub_operand[BOOST_BIND_ACTION(push_addsub_binop)] ));
 
@@ -665,21 +669,26 @@ public:
 
       addsubop_operator = bsc::str_p("+") | bsc::str_p("-");
 
-
       arith_cmp = bsc::str_p(">=") | bsc::str_p("<=") | bsc::str_p("==") | bsc::str_p("<") | bsc::str_p(">") | bsc::str_p("!=");
 
-      log_op = bsc::str_p("and") | bsc::str_p("or");
+      and_op =  bsc::str_p("and");
 
-      variable =  bsc::lexeme_d[(+bsc::alpha_p >> *( bsc::alpha_p | bsc::digit_p | '_') )];
+      or_op =  bsc::str_p("or");
+
+      variable =  bsc::lexeme_d[(+bsc::alpha_p >> *( bsc::alpha_p | bsc::digit_p | '_') ) -  bsc::str_p("not")] ;
     }
 
 
-    bsc::rule<ScannerT> cast, data_type, variable, trim_type, trim_remove_type, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor, trim, trim_whitespace_both, trim_one_side_whitespace, trim_anychar_anyside, substr, substr_from, substr_from_for, datediff, dateadd, extract, date_part, date_part_extract;
-    bsc::rule<ScannerT> special_predicates,between_predicate, in_predicate, like_predicate, is_null, is_not_null;
+    bsc::rule<ScannerT> cast, data_type, variable,  select_expr, s3_object, where_clause, number, float_number, string;
+    bsc::rule<ScannerT> cmp_operand, arith_cmp, condition_expression, arithmetic_predicate, logical_predicate, factor; 
+    bsc::rule<ScannerT> trim, trim_whitespace_both, trim_one_side_whitespace, trim_anychar_anyside, trim_type, trim_remove_type, substr, substr_from, substr_from_for;
+    bsc::rule<ScannerT> datediff, dateadd, extract, date_part, date_part_extract;
+    bsc::rule<ScannerT> special_predicates, between_predicate, in_predicate, like_predicate, is_null, is_not_null;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
     bsc::rule<ScannerT> when_case_else_projection, when_case_value_when, when_stmt, when_value_then;
+    bsc::rule<ScannerT> logical_and,and_op,or_op;
     bsc::rule<ScannerT> const& start() const
     {
       return select_expr;
@@ -1011,10 +1020,14 @@ void push_negation::builder(s3select* self, const char* a, const char* b) const
     negate_function_operation* nf = S3SELECT_NEW(self, negate_function_operation, pred);
     self->getAction()->condQ.push_back(nf);
   }
-  else
+  else if(pred)
   {
     arithmetic_operand* f = S3SELECT_NEW(self, arithmetic_operand, pred);
     self->getAction()->condQ.push_back(f);
+  }
+  else
+  {
+    throw base_s3select_exception(std::string("failed to create AST for NOT operator"), base_s3select_exception::s3select_exp_en_t::FATAL);
   }
 }
 
@@ -1087,19 +1100,41 @@ void push_between_filter::builder(s3select* self, const char* a, const char* b) 
   self->getAction()->condQ.push_back(func);
 }
 
-void push_in_predicate_counter::builder(s3select* self, const char* a, const char* b) const
+void push_in_predicate_first_arg::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  self->getAction()->in_set_count ++;
+  if(self->getAction()->exprQ.empty())
+  {
+    throw base_s3select_exception("failed to create AST for in predicate", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  self->getAction()->inPredicateQ.push_back( self->getAction()->exprQ.back() );
+  self->getAction()->exprQ.pop_back();
+
+  if(self->getAction()->exprQ.empty())
+  {
+    throw base_s3select_exception("failed to create AST for in predicate", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  self->getAction()->inMainArg = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
 
 }
 
-void push_in_predicate_counter_start::builder(s3select* self, const char* a, const char* b) const
+void push_in_predicate_arguments::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  self->getAction()->in_set_count = 1;
+  if(self->getAction()->exprQ.empty())
+  {
+    throw base_s3select_exception("failed to create AST for in predicate", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  self->getAction()->inPredicateQ.push_back( self->getAction()->exprQ.back() );
+
+  self->getAction()->exprQ.pop_back();
 
 }
 
@@ -1112,18 +1147,23 @@ void push_in_predicate::builder(s3select* self, const char* a, const char* b) co
 
   __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
 
-  while(self->getAction()->in_set_count)
+  while(!self->getAction()->inPredicateQ.empty())
   {
-    base_statement* ei = self->getAction()->exprQ.back();
+    base_statement* ei = self->getAction()->inPredicateQ.back();
 
-    self->getAction()->exprQ.pop_back();
+    self->getAction()->inPredicateQ.pop_back();
 
     func->push_argument(ei);
 
-    self->getAction()->in_set_count --;
   }
 
+  func->push_argument( self->getAction()->inMainArg );
+
   self->getAction()->condQ.push_back(func);
+
+  self->getAction()->inPredicateQ.clear();
+
+  self->getAction()->inMainArg = 0;
 }
 
 void push_like_predicate::builder(s3select* self, const char* a, const char* b) const
