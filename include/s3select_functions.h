@@ -82,6 +82,7 @@ enum class s3select_func_En_t {ADD,
                                TO_INT,
                                TO_FLOAT,
                                TO_TIMESTAMP,
+                               TO_BOOL,
                                SUBSTR,
                                EXTRACT_YEAR,
                                EXTRACT_MONTH,
@@ -145,6 +146,7 @@ private:
     {"float", s3select_func_En_t::TO_FLOAT},
     {"substring", s3select_func_En_t::SUBSTR},
     {"to_timestamp", s3select_func_En_t::TO_TIMESTAMP},
+    {"to_bool", s3select_func_En_t::TO_BOOL},
     {"#extract_year#", s3select_func_En_t::EXTRACT_YEAR},
     {"#extract_month#", s3select_func_En_t::EXTRACT_MONTH},
     {"#extract_day#", s3select_func_En_t::EXTRACT_DAY},
@@ -1616,6 +1618,40 @@ struct _fn_string : public base_function
   }
 };
 
+struct _fn_to_bool : public base_function
+{
+
+  value func_arg;
+
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
+  {
+    int64_t i=0;
+    func_arg = (*args->begin())->eval();
+
+    if (func_arg.type == value::value_En_t::FLOAT)
+    {
+      i = func_arg.dbl();
+    }
+    else if (func_arg.type == value::value_En_t::DECIMAL || func_arg.type == value::value_En_t::BOOL)
+    {
+      i = func_arg.i64();
+    }
+    else
+    {
+      i = 0;
+    }
+    if (i == 0) 
+    {
+      result->set_value(false);
+    }
+    else
+    {
+      result->set_value(true);
+    }
+    return true;
+  }
+};
+
 struct _fn_trim : public base_function {
 
     std::string input_string;
@@ -1760,6 +1796,10 @@ base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt
 
   case s3select_func_En_t::TO_TIMESTAMP:
     return S3SELECT_NEW(this,_fn_to_timestamp);
+    break;
+
+  case s3select_func_En_t::TO_BOOL:
+    return S3SELECT_NEW(this,_fn_to_bool);
     break;
 
   case s3select_func_En_t::EXTRACT_YEAR:

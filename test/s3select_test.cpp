@@ -3392,3 +3392,308 @@ TEST(TestS3selectFunctions, test_trim_expressions)
 
   ASSERT_EQ(s3select_result_3, s3select_result_4);
 }
+
+TEST(TestS3selectFunctions, truefalse)
+{
+  test_single_column_single_row("select 2 from s3object where true or false;","2,\n");
+  test_single_column_single_row("select 2 from s3object where true or true;","2,\n");
+  test_single_column_single_row("select 2 from s3object where null or true ;","2,\n");
+  test_single_column_single_row("select 2 from s3object where true and true;","2,\n");
+  test_single_column_single_row("select 2 from s3object where true == true ;","2,\n");
+  test_single_column_single_row("select 2 from stdin where 1<2 == true;","2,\n");
+  test_single_column_single_row("select 2 from stdin where 1==1 == true;","2,\n");
+  test_single_column_single_row("select 2 from stdin where false==false == true;","2,\n");
+  test_single_column_single_row("select 2 from s3object where false or true;","2,\n");
+  test_single_column_single_row("select true,false from s3object where false == false;","true,false,\n");
+  test_single_column_single_row("select count(*) from s3object where not (1>2) == true;","1,");
+  test_single_column_single_row("select count(*) from s3object where not (1>2) == (not false);","1,");
+  test_single_column_single_row("select (true or false) from s3object;","true,\n");
+  test_single_column_single_row("select (true and true) from s3object;","true,\n");
+  test_single_column_single_row("select (true and null) from s3object;","null,\n");
+  test_single_column_single_row("select (false or false) from s3object;","false,\n");
+  test_single_column_single_row("select (not true) from s3object;","false,\n");
+  test_single_column_single_row("select (not 1 > 2) from s3object;","true,\n");
+  test_single_column_single_row("select (not 1 > 2) as a1,cast(a1 as int)*4 from s3object;","true,4,\n");
+  test_single_column_single_row("select (1 > 2) from s3object;","false,\n");
+  test_single_column_single_row("select case when (nullif(3,3) is null) == true then \"case_1_1\" else \"case_2_2\"  end, case when (\"a\" in (\"a\",\"b\")) == true then \"case_3_3\" else \"case_4_4\" end, case when 1>3 then \"case_5_5\" else \"case_6_6\" end from s3object where (3*3 == 9);","case_1_1,case_3_3,case_6_6,\n");
+}
+
+TEST(TestS3selectFunctions, boolcast)
+{
+  test_single_column_single_row("select cast(5 as bool) from s3object;","true,\n");
+  test_single_column_single_row("select cast(0 as bool) from s3object;","false,\n");
+  test_single_column_single_row("select cast(true as bool) from s3object;","true,\n");
+  test_single_column_single_row("select cast('a' as bool) from s3object;","false,\n");
+}
+
+TEST(TestS3selectFunctions, predicate_as_projection_column)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query = "select (int(_2) between int(_3) and int(_4)) from s3object where int(_2)>int(_3) and int(_2)<int(_4);";
+
+  std::string s3select_result = run_s3select(input_query,input);
+
+  ASSERT_NE(s3select_result,failure_sign);
+
+  auto count = std::count(s3select_result.begin(), s3select_result.end(), '0');
+
+  ASSERT_EQ(count,0);
+
+  const std::string input_query_1 = "select (nullif(_1,_2) is null) from s3object where _1 == _2;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  auto count_1 = std::count(s3select_result_1.begin(), s3select_result_1.end(), '0');
+
+  ASSERT_EQ(count_1,0);
+
+  const std::string input_query_2 = "select (nullif(_1,_2) is not null) from s3object where _1 != _2;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_NE(s3select_result_2,failure_sign);
+
+  auto count_2 = std::count(s3select_result_2.begin(), s3select_result_2.end(), '0');
+
+  ASSERT_EQ(count_2,0);
+
+  const std::string input_query_3 = "select (_1 like \"_3\") from s3object where character_length(_1) == 2 and substring(_1,2,1) in (\"3\");";
+
+  std::string s3select_result_3 = run_s3select(input_query_3,input);
+
+  ASSERT_NE(s3select_result_3,failure_sign);
+
+  auto count_3 = std::count(s3select_result_3.begin(), s3select_result_3.end(), '0');
+
+  ASSERT_EQ(count_3,0);
+
+  const std::string input_query_4 = "select (int(_1) in (1)) from s3object where int(_1) == 1;";
+
+  std::string s3select_result_4 = run_s3select(input_query_4,input);
+
+  ASSERT_NE(s3select_result_4,failure_sign);
+
+  auto count_4 = std::count(s3select_result_4.begin(), s3select_result_4.end(), '0');
+
+  ASSERT_EQ(count_4,0);
+}
+
+TEST(TestS3selectFunctions, truefalse_multirows_expressions)
+{
+  std::string input, input1;
+  size_t size = 10000;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query_1 = "select count(*) from s3object where cast(_3 as int)>999 == true;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select count(*) from s3object where char_length(_3)>3 == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+
+  const std::string input_query_3 = "select count(*) from s3object where char_length(_3)==3 == true;";
+
+  std::string s3select_result_3 = run_s3select(input_query_3,input);
+
+  ASSERT_NE(s3select_result_3,failure_sign);
+
+  const std::string input_query_4 = "select count(*) from s3object where cast(_3 as int)>99 == true and cast(_3 as int)<1000 == true;";
+
+  std::string s3select_result_4 = run_s3select(input_query_4,input);
+
+  ASSERT_EQ(s3select_result_3, s3select_result_4);
+
+  generate_rand_columns_csv_with_null(input1, size);
+
+  const std::string input_query_5 = "select count(*) from s3object where (_3 is null) == true;";
+
+  std::string s3select_result_5 = run_s3select(input_query_5,input1);
+
+  ASSERT_NE(s3select_result_5,failure_sign);
+
+  const std::string input_query_6 = "select count(*) from s3object where (nullif(_3,null) is null) == true;";
+
+  std::string s3select_result_6 = run_s3select(input_query_6,input1);
+
+  ASSERT_NE(s3select_result_6,failure_sign);
+
+  ASSERT_EQ(s3select_result_5,s3select_result_6);
+}
+
+TEST(TestS3selectFunctions, truefalse_date_time_expressions)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_rand_columns_csv_datetime(input, size);
+  const std::string input_query_1 = "select count(*) from s3object where extract(year from to_timestamp(_1)) > 1950 == true and extract(year from to_timestamp(_1)) < 1960 == true;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select count(*) from s3object where int(substring(_1,1,4))>1950 == true and int(substring(_1,1,4))<1960 == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+}
+
+TEST(TestS3selectFunctions, truefalse_trim_expressions)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_csv_trim(input, size);
+  const std::string input_query_1 = "select count(*) from stdin where trim(_1) == \"aeiou\" == true;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select count(*) from stdin where substring(_1 from 6 for 5) == \"aeiou\" == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+}
+
+TEST(TestS3selectFunctions, tuefalse_like_expressions)
+{
+  std::string input, input1;
+  size_t size = 10000;
+  generate_csv(input, size);
+  const std::string input_query_1 = "select count(*) from stdin where (_4 like \"%ar\") == true;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select count(*) from stdin where (substring(_4,char_length(_4),1) == \"r\") == true and (substring(_4,char_length(_4)-1,1) == \"a\") == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+
+  generate_csv_like(input1, size);
+
+  const std::string input_query_3 = "select count(*) from stdin where (_1 like \"%aeio%\") == true;";
+
+  std::string s3select_result_3 = run_s3select(input_query_3,input1);
+
+  ASSERT_NE(s3select_result_3,failure_sign);
+
+  const std::string input_query_4 = "select count(*) from stdin where (substring(_1,4,4) == \"aeio\") == true;";
+
+  std::string s3select_result_4 = run_s3select(input_query_4,input1);
+
+  ASSERT_EQ(s3select_result_3, s3select_result_4);
+
+  const std::string input_query_5 = "select count(*) from stdin where (_1 like \"%r[r-s]\") == true;";
+
+  std::string s3select_result_5 = run_s3select(input_query_5,input);
+
+  ASSERT_NE(s3select_result_5,failure_sign);
+
+  const std::string input_query_6 = "select count(*) from stdin where (substring(_1,char_length(_1),1) between \"r\" and \"s\") == true and (substring(_1,char_length(_1)-1,1) == \"r\") == true;";
+
+  std::string s3select_result_6 = run_s3select(input_query_6,input);
+
+  ASSERT_EQ(s3select_result_5, s3select_result_6);
+
+  const std::string input_query_7 = "select count(*) from stdin where (_1 like \"%br_\") == true;";
+
+  std::string s3select_result_7 = run_s3select(input_query_7,input);
+
+  ASSERT_NE(s3select_result_7,failure_sign);
+
+  const std::string input_query_8 = "select count(*) from stdin where (substring(_1,char_length(_1)-1,1) == \"r\") == true and (substring(_1,char_length(_1)-2,1) == \"b\") == true;";
+
+  std::string s3select_result_8 = run_s3select(input_query_8,input);
+
+  ASSERT_EQ(s3select_result_7, s3select_result_8);
+}
+
+TEST(TestS3selectFunctions, truefalse_coalesce_expressions)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query_1 = "select count(*) from s3object where char_length(_3)>2 and char_length(_4)>2 == true and cast(substring(_3,1,2) as int) == cast(substring(_4,1,2) as int) == true;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select count(*) from s3object where cast(_3 as int)>99 == true and cast(_4 as int)>99 == true and (coalesce(nullif(cast(substring(_3,1,2) as int),cast(substring(_4,1,2) as int)),7) == 7) == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+}
+
+TEST(TestS3selectFunctions, truefalse_in_expressions)
+{
+  std::string input;
+  size_t size = 10000;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query_1 = "select int(_1) from s3object where (int(_1) in(1)) == true;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select int(_1) from s3object where int(_1) == 1 == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+
+  const std::string input_query_7 = "select int(_2) from s3object where (int(_2)*2 in(int(_3)*2,int(_4)*3,int(_5)*5)) == true;";
+
+  std::string s3select_result_7 = run_s3select(input_query_7,input);
+
+  ASSERT_NE(s3select_result_7,failure_sign);
+
+  const std::string input_query_8 = "select int(_2) from s3object where int(_2)*2 == int(_3)*2 == true or int(_2)*2 == int(_4)*3 == true or int(_2)*2 == int(_5)*5 == true;";
+
+  std::string s3select_result_8 = run_s3select(input_query_8,input);
+
+  ASSERT_EQ(s3select_result_7, s3select_result_8);
+
+  const std::string input_query_9 = "select int(_1) from s3object where character_length(_1) == 2 == true and (substring(_1,2,1) in (\"3\")) == true;";
+
+  std::string s3select_result_9 = run_s3select(input_query_9,input);
+
+  ASSERT_NE(s3select_result_9,failure_sign);
+
+  const std::string input_query_10 = "select int(_1) from s3object where (_1 like \"_3\") == true;";
+
+  std::string s3select_result_10 = run_s3select(input_query_10,input);
+
+  ASSERT_EQ(s3select_result_9, s3select_result_10);
+}
+
+TEST(TestS3selectFunctions, truefalse_alias_expressions)
+{
+  std::string input;
+  size_t size = 100;
+  generate_rand_columns_csv(input, size);
+  const std::string input_query_1 = "select (int(_1) > int(_2)) as a1 from s3object where a1 == true ;";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select (int(_1) > int(_2)) from s3object where int(_1) > int(_2) == true;";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+}

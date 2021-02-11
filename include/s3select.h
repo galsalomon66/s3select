@@ -52,7 +52,6 @@ struct actionQ
   std::vector<logical_operand::oplog_t> logical_compareQ;
   std::vector<base_statement*> exprQ;
   std::vector<base_statement*> funcQ;
-  std::vector<base_statement*> condQ;
   std::vector<base_statement*> whenThenQ;
   std::vector<base_statement*> inPredicateQ;
   base_statement* inMainArg;
@@ -67,7 +66,7 @@ struct actionQ
 
   size_t when_then_count;
 
-  actionQ(): inMainArg(0),when_then_count(0){}
+  actionQ(): inMainArg(0),from_clause("##"),when_then_count(0){}//TODO remove when_then_count
 
   std::map<const void*,std::vector<const char*> *> x_map;
 
@@ -518,12 +517,12 @@ public:
 
   base_statement* get_filter()
   {
-    if(m_actionQ.condQ.empty())
+    if(m_actionQ.exprQ.empty())
     {
       return nullptr;
     }
 
-    return m_actionQ.condQ.back();
+    return m_actionQ.exprQ.back();
   }
 
   std::vector<base_statement*>  get_projections_list()
@@ -565,7 +564,9 @@ public:
 
       projection_expression = (when_case_else_projection|when_case_value_when) [BOOST_BIND_ACTION(push_projection)] | 
                               (arithmetic_expression >> bsc::str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] | 
-                              (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)];
+                              (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)] | 
+			      (arithmetic_predicate >> bsc::str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] |
+                              (arithmetic_predicate)[BOOST_BIND_ACTION(push_projection)] ;
 
       alias_name = bsc::lexeme_d[(+bsc::alpha_p >> *bsc::digit_p)] ;
 
@@ -627,7 +628,7 @@ public:
 
       cast = (bsc::str_p("cast") >> '(' >> arithmetic_expression >> bsc::str_p("as") >> (data_type)[BOOST_BIND_ACTION(push_data_type)] >> ')') [BOOST_BIND_ACTION(push_cast_expr)];
 
-      data_type = (bsc::str_p("int") | bsc::str_p("float") | bsc::str_p("string") |  bsc::str_p("timestamp") );
+      data_type = (bsc::str_p("int") | bsc::str_p("float") | bsc::str_p("string") |  bsc::str_p("timestamp") | bsc::str_p("bool") );
      
       substr = (substr_from) | (substr_from_for);
       
@@ -711,6 +712,9 @@ void push_from_clause::builder(s3select* self, const char* a, const char* b) con
   std::string token(a, b);
 
   self->getAction()->from_clause = token;
+
+  self->getAction()->exprQ.clear();
+
 }
 
 void push_number::builder(s3select* self, const char* a, const char* b) const
@@ -771,6 +775,14 @@ void push_variable::builder(s3select* self, const char* a, const char* b) const
     else if (g_s3select_reserve_word.get_reserved_word(token) == s3select_reserved_word::reserve_word_en_t::S3S_NAN)
     {
       v = S3SELECT_NEW(self, variable, s3select_reserved_word::reserve_word_en_t::S3S_NAN);
+    }
+    else if (g_s3select_reserve_word.get_reserved_word(token) == s3select_reserved_word::reserve_word_en_t::S3S_FALSE)
+    {
+      v = S3SELECT_NEW(self, variable, s3select_reserved_word::reserve_word_en_t::S3S_FALSE);
+    }
+    else if (g_s3select_reserve_word.get_reserved_word(token) == s3select_reserved_word::reserve_word_en_t::S3S_TRUE)
+    {
+      v = S3SELECT_NEW(self, variable, s3select_reserved_word::reserve_word_en_t::S3S_TRUE);
     }
     else
     {
@@ -946,14 +958,30 @@ void push_arithmetic_predicate::builder(s3select* self, const char* a, const cha
   base_statement* vr, *vl;
   arithmetic_operand::cmp_t c = self->getAction()->arithmetic_compareQ.back();
   self->getAction()->arithmetic_compareQ.pop_back();
-  vr = self->getAction()->exprQ.back();
-  self->getAction()->exprQ.pop_back();
-  vl = self->getAction()->exprQ.back();
-  self->getAction()->exprQ.pop_back();
 
+  if (!self->getAction()->exprQ.empty())
+  {
+    vr = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  }
+  else
+  {
+    throw base_s3select_exception(std::string("missing right operand for arithmetic-comparision expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  
+  if (!self->getAction()->exprQ.empty())
+  {
+    vl = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  }
+  else
+  {
+    throw base_s3select_exception(std::string("missing left operand for arithmetic-comparision expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  
   arithmetic_operand* t = S3SELECT_NEW(self, arithmetic_operand, vl, c, vr);
 
-  self->getAction()->condQ.push_back(t);
+  self->getAction()->exprQ.push_back(t);
 }
 
 void push_logical_predicate::builder(s3select* self, const char* a, const char* b) const
@@ -964,12 +992,7 @@ void push_logical_predicate::builder(s3select* self, const char* a, const char* 
   logical_operand::oplog_t oplog = self->getAction()->logical_compareQ.back();
   self->getAction()->logical_compareQ.pop_back();
 
-  if (self->getAction()->condQ.empty() == false)
-  {
-    tr = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
-  }
-  else if(self->getAction()->exprQ.empty() == false)
+  if (self->getAction()->exprQ.empty() == false)
   {
     tr = self->getAction()->exprQ.back();
     self->getAction()->exprQ.pop_back();
@@ -979,12 +1002,7 @@ void push_logical_predicate::builder(s3select* self, const char* a, const char* 
     throw base_s3select_exception(std::string("missing right operand for logical expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
   }
 
-  if (self->getAction()->condQ.empty() == false)
-  {
-    tl = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
-  }
-  else if(self->getAction()->exprQ.empty() == false)
+  if (self->getAction()->exprQ.empty() == false)
   {
     tl = self->getAction()->exprQ.back();
     self->getAction()->exprQ.pop_back();
@@ -996,7 +1014,7 @@ void push_logical_predicate::builder(s3select* self, const char* a, const char* 
 
   logical_operand* f = S3SELECT_NEW(self, logical_operand, tl, oplog, tr);
 
-  self->getAction()->condQ.push_back(f);
+  self->getAction()->exprQ.push_back(f);
 }
 
 void push_negation::builder(s3select* self, const char* a, const char* b) const
@@ -1004,26 +1022,31 @@ void push_negation::builder(s3select* self, const char* a, const char* b) const
   std::string token(a, b);
   base_statement* pred = nullptr;
 
-  if (self->getAction()->condQ.empty() == false)
+  if (self->getAction()->exprQ.empty() == false)
   {
-    pred = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
+    pred = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
   }
+  else
+  {
+    throw base_s3select_exception(std::string("failed to create AST for NOT operator"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  
   //upon NOT operator, the logical and arithmetical operators are "tagged" to negate result.
   if (dynamic_cast<logical_operand*>(pred))
   {
     logical_operand* f = S3SELECT_NEW(self, logical_operand, pred);
-    self->getAction()->condQ.push_back(f);
+    self->getAction()->exprQ.push_back(f);
   }
-  else if (dynamic_cast<__function*>(pred) || dynamic_cast<negate_function_operation*>(pred))
+  else if (dynamic_cast<__function*>(pred) || dynamic_cast<negate_function_operation*>(pred) || dynamic_cast<variable*>(pred))
   {
     negate_function_operation* nf = S3SELECT_NEW(self, negate_function_operation, pred);
-    self->getAction()->condQ.push_back(nf);
+    self->getAction()->exprQ.push_back(nf);
   }
-  else if(pred)
+  else if(dynamic_cast<arithmetic_operand*>(pred))
   {
     arithmetic_operand* f = S3SELECT_NEW(self, arithmetic_operand, pred);
-    self->getAction()->condQ.push_back(f);
+    self->getAction()->exprQ.push_back(f);
   }
   else
   {
@@ -1097,7 +1120,7 @@ void push_between_filter::builder(s3select* self, const char* a, const char* b) 
   self->getAction()->exprQ.pop_back();
   func->push_argument(main_expr);
 
-  self->getAction()->condQ.push_back(func);
+  self->getAction()->exprQ.push_back(func);
 }
 
 void push_in_predicate_first_arg::builder(s3select* self, const char* a, const char* b) const
@@ -1159,7 +1182,7 @@ void push_in_predicate::builder(s3select* self, const char* a, const char* b) co
 
   func->push_argument( self->getAction()->inMainArg );
 
-  self->getAction()->condQ.push_back(func);
+  self->getAction()->exprQ.push_back(func);
 
   self->getAction()->inPredicateQ.clear();
 
@@ -1194,7 +1217,7 @@ void push_like_predicate::builder(s3select* self, const char* a, const char* b) 
   self->getAction()->exprQ.pop_back();
   func->push_argument(main_expr);
 
-  self->getAction()->condQ.push_back(func);
+  self->getAction()->exprQ.push_back(func);
 }
 
 void push_is_null_predicate::builder(s3select* self, const char* a, const char* b) const
@@ -1225,14 +1248,8 @@ void push_is_null_predicate::builder(s3select* self, const char* a, const char* 
     self->getAction()->exprQ.pop_back();
     func->push_argument(expr);
   }
-  else if (!self->getAction()->condQ.empty())
-  {
-    base_statement* expr = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
-    func->push_argument(expr);
-  }
 
-  self->getAction()->condQ.push_back(func);
+  self->getAction()->exprQ.push_back(func);
 }
 
 void push_when_condition_then::builder(s3select* self, const char* a, const char* b) const
@@ -1244,8 +1261,8 @@ void push_when_condition_then::builder(s3select* self, const char* a, const char
  base_statement* then_expr = self->getAction()->exprQ.back();
  self->getAction()->exprQ.pop_back();
 
- base_statement* when_expr = self->getAction()->condQ.back();
- self->getAction()->condQ.pop_back();
+ base_statement* when_expr = self->getAction()->exprQ.back();
+ self->getAction()->exprQ.pop_back();
 
  func->push_argument(then_expr);
  func->push_argument(when_expr);
@@ -1281,7 +1298,7 @@ void push_case_when_else::builder(s3select* self, const char* a, const char* b) 
 // Because of the double-scan (bug in spirit?defintion?), a sub-tree for the left side is created, twice.
 // thus, it causes wrong calculation.
 
-  self->getAction()->condQ.clear();
+  self->getAction()->exprQ.clear();
 
   self->getAction()->exprQ.push_back(func);
 }
@@ -1356,6 +1373,9 @@ void push_data_type::builder(s3select* self, const char* a, const char* b) const
   }else if(cast_operator("timestamp"))
   {
     self->getAction()->dataTypeQ.push_back("to_timestamp");
+  }else if(cast_operator("bool"))
+  {
+    self->getAction()->dataTypeQ.push_back("to_bool");
   }
 }
 

@@ -272,7 +272,9 @@ class s3select_reserved_word
   {
     NA,
     S3S_NULL,//TODO check AWS defintions for reserve words, its a long list , what about functions-names? 
-    S3S_NAN 
+    S3S_NAN,
+    S3S_TRUE,
+    S3S_FALSE
   } ;
 
   using reserved_words = std::map<std::string,reserve_word_en_t>;
@@ -280,7 +282,9 @@ class s3select_reserved_word
   const reserved_words m_reserved_words=
   {
     {"null",reserve_word_en_t::S3S_NULL},{"NULL",reserve_word_en_t::S3S_NULL},
-    {"nan",reserve_word_en_t::S3S_NAN},{"NaN",reserve_word_en_t::S3S_NAN}
+    {"nan",reserve_word_en_t::S3S_NAN},{"NaN",reserve_word_en_t::S3S_NAN},
+    {"true",reserve_word_en_t::S3S_TRUE},{"TRUE",reserve_word_en_t::S3S_TRUE},
+    {"false",reserve_word_en_t::S3S_FALSE},{"FALSE",reserve_word_en_t::S3S_FALSE}
   };
 
   bool is_reserved_word(std::string & token)
@@ -437,6 +441,7 @@ public:
     TIMESTAMP,
     S3NULL,
     S3NAN,
+    BOOL,
     NA
   } ;
   value_En_t type;
@@ -492,6 +497,11 @@ public:
     return type == value_En_t::TIMESTAMP;
   }
 
+  bool is_bool() const
+  {
+    return type == value_En_t::BOOL;
+  }
+
   bool is_null() const
   {
     return type == value_En_t::S3NULL;
@@ -516,6 +526,18 @@ public:
     type = value_En_t::FLOAT;
   }
 
+  void set_true() 
+  {
+    __val.num = 1;
+    type = value_En_t::BOOL;
+  }
+
+  void set_false() 
+  {
+    __val.num = 0;
+    type = value_En_t::BOOL;
+  }
+
   void setnull()
   {
     type = value_En_t::S3NULL;
@@ -529,6 +551,17 @@ public:
       if (type == value_En_t::DECIMAL)
       {
         m_to_string.assign( boost::lexical_cast<std::string>(__val.num) );
+      }
+      if (type == value_En_t::BOOL)
+      {
+        if(__val.num == 0)
+        {
+          m_to_string.assign("false");
+        }
+        else
+        {
+          m_to_string.assign("true");
+        }
       }
       else if(type == value_En_t::FLOAT)
       {
@@ -597,7 +630,7 @@ public:
   value& operator=(bool b)
   {
     this->__val.num = (int64_t)b;
-    this->type = value_En_t::DECIMAL;
+    this->type = value_En_t::BOOL;
 
     return *this;
   }
@@ -770,6 +803,17 @@ public:
       return *timestamp() == *(v.timestamp());
     }
 
+    if(
+    (is_bool() && v.is_bool())
+    ||
+    (is_number() && v.is_bool())
+    ||
+    (is_bool() && v.is_number())
+    )
+    {
+      return __val.num == v.__val.num;
+    }
+
     if (is_nan() || v.is_nan())
     {
       return false;
@@ -813,6 +857,11 @@ public:
     {
       throw base_s3select_exception("illegal binary operation with string");
     }
+    if (l.is_bool() || r.is_bool())
+    {
+      throw base_s3select_exception("illegal binary operation with bool type");
+    }
+
     if (l.is_number() && r.is_number())
     {
       if (l.type != r.type)
@@ -1148,6 +1197,18 @@ public:
       column_pos = -1;
       var_value.set_nan();
     }
+    else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_TRUE)
+    {
+      m_var_type = variable::var_t::COL_VALUE;
+      column_pos = -1;
+      var_value.set_true();
+    }
+    else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_FALSE)
+    {
+      m_var_type = variable::var_t::COL_VALUE;
+      column_pos = -1;
+      var_value.set_false();
+    }
     else 
     {
       _name = "#";
@@ -1184,6 +1245,7 @@ public:
   void set_value(bool b)
   {
   	var_value = b;
+    var_value.type = value::value_En_t::BOOL;
   }
 
   void set_null()
@@ -1693,15 +1755,15 @@ class negate_function_operation : public base_statement
   {
     res = function_to_negate->eval();
 
-    if (res.is_number())//TODO is integer type
+    if (res.is_number() || res.is_bool())//TODO is integer type
     {
       if (res.is_true())
       {
-        res = (int64_t)0;
+        res = (bool)0;
       }
       else
       {
-        res = (int64_t)1;
+        res = (bool)1;
       }
     }
 
