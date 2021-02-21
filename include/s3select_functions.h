@@ -599,42 +599,43 @@ struct _fn_to_int : public base_function
 
 struct _fn_to_float : public base_function
 {
-
   value var_result;
-  value v_from;
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    char* perr;
-    double d=0;
     value v = (*args->begin())->eval();
 
-    if (v.type == value::value_En_t::STRING)
+    switch (v.type) {
+
+    case value::value_En_t::STRING:
     {
-      errno = 0;
-      d = strtod(v.str(), &perr) ;  //TODO check error before constructor
-      if ((errno == ERANGE && (d == LONG_MAX || d == LONG_MIN)) || (errno != 0 && d == 0)) {
+      char* pend;
+      double d = strtod(v.str(), &pend);
+      if (errno == ERANGE) {
         throw base_s3select_exception("converted value would fall out of the range of the result type!");
-        return false;  
+      }
+      if (pend == v.str()) {
+        // no number found
+        throw base_s3select_exception("text cannot be converted to a number");
+      }
+      if (*pend) {
+        throw base_s3select_exception("extra characters after the number");
+      }
+
+      var_result = d;
     }
-    
-    if (*perr != '\0') {
-      throw base_s3select_exception("characters after float!");
-      return false;
-    }
-  }
-    else if (v.type == value::value_En_t::FLOAT)
-    {
-      d = v.dbl();
-    }
-    else
-    {
-      d = v.i64();
+    break;
+
+    case value::value_En_t::FLOAT:
+      var_result = v.dbl();
+      break;
+
+    default:
+      var_result = v.i64();
+      break;
     }
 
-    var_result = d;
     *result = var_result;
-
     return true;
   }
 

@@ -689,7 +689,7 @@ int count_string(std::string in,std::string substr)
 }
 
 
-void test_single_column_single_row(const char* input_query,const char* expected_result)
+void test_single_column_single_row(const char* input_query,const char* expected_result,const char * error_description = 0)
 {
     s3select s3select_syntax;
     auto status = s3select_syntax.parse_query(input_query);
@@ -704,6 +704,17 @@ void test_single_column_single_row(const char* input_query,const char* expected_
         false, // dont skip last line
         true   // aggregate call
         );
+
+    if(strcmp(expected_result,"#failure#") == 0)
+    {
+      if (status==0 && s3select_result.compare("#failure#")==0)
+      {
+	  ASSERT_TRUE(0);
+      }
+      ASSERT_EQ(s3_csv_object.get_error_description(),error_description);
+      return;
+    }
+
     ASSERT_EQ(status, 0);
     ASSERT_EQ(s3select_result, std::string(expected_result));
 }
@@ -3424,6 +3435,13 @@ TEST(TestS3selectFunctions, boolcast)
   test_single_column_single_row("select cast(0 as bool) from s3object;","false,\n");
   test_single_column_single_row("select cast(true as bool) from s3object;","true,\n");
   test_single_column_single_row("select cast('a' as bool) from s3object;","false,\n");
+}
+
+TEST(TestS3selectFunctions, floatcast)
+{
+  test_single_column_single_row("select cast('1234a' as float) from s3object;","#failure#","extra characters after the number");
+  test_single_column_single_row("select cast('a1234' as float) from s3object;","#failure#","text cannot be converted to a number");
+  test_single_column_single_row("select cast('999e+999' as float) from s3object;","#failure#","converted value would fall out of the range of the result type!");
 }
 
 TEST(TestS3selectFunctions, predicate_as_projection_column)
