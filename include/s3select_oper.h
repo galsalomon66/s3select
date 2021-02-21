@@ -6,8 +6,9 @@
 #include <list>
 #include <map>
 #include <vector>
-#include <string.h>
-#include <math.h>
+#include <algorithm>
+#include <cstring>
+#include <cmath>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -30,7 +31,6 @@ class ChunkAllocator : public std::allocator<T>
 public:
   typedef size_t size_type;
   typedef T* pointer;
-  typedef const T* const_pointer;
   size_t buffer_capacity;
   char* buffer_ptr;
 
@@ -64,7 +64,7 @@ public:
   }
 
   //==================================
-  inline pointer allocate(size_type n, const void* hint = 0)
+  inline pointer allocate(size_type n,  [[maybe_unused]] const void* hint = 0)
   {
     return (_Allocate(n, (pointer)0));
   }
@@ -75,7 +75,7 @@ public:
   }
 
   //==================================
-  ChunkAllocator() throw() : std::allocator<T>()
+  ChunkAllocator() noexcept : std::allocator<T>()
   {
     // alloc from main-buffer
     buffer_capacity = 0;
@@ -84,7 +84,7 @@ public:
   }
 
   //==================================
-  ChunkAllocator(const ChunkAllocator& other) throw() : std::allocator<T>(other)
+  ChunkAllocator(const ChunkAllocator& other) noexcept : std::allocator<T>(other)
   {
     // copy const
     buffer_capacity = 0;
@@ -92,7 +92,7 @@ public:
   }
 
   //==================================
-  ~ChunkAllocator() throw()
+  ~ChunkAllocator() noexcept
   {
     //do nothing
   }
@@ -120,7 +120,7 @@ private:
 
 public:
   std::string _msg;
-  base_s3select_exception(const char* n) : m_severity(s3select_exp_en_t::NONE)
+  explicit base_s3select_exception(const char* n) : m_severity(s3select_exp_en_t::NONE)
   {
     _msg.assign(n);
   }
@@ -143,7 +143,7 @@ public:
     return m_severity;
   }
 
-  virtual ~base_s3select_exception() {}
+  virtual ~base_s3select_exception() = default;
 };
 
 
@@ -229,25 +229,13 @@ public:
 
   void update(std::vector<char*>& tokens, size_t num_of_tokens)
   {
-    size_t i=0;
-    for(auto s : tokens)
-    {
-      if (i>=num_of_tokens)
-      {
-        break;
-      }
-
-      m_columns[i++] = s;
-    }
-    m_upper_bound = i;
-
+    std::copy_n(tokens.begin(), num_of_tokens, m_columns.begin());
+    m_upper_bound = num_of_tokens;
   }
 
   int get_column_pos(const char* n)
   {
-    //done only upon building the AST , not on "runtime"
-
-    std::vector<std::pair<std::string, int >>::iterator iter;
+    //done only upon building the AST, not on "runtime"
 
     for( auto iter : m_column_name_pos)
     {
@@ -262,7 +250,6 @@ public:
 
   std::string_view get_column_value(int column_pos)
   {
-
     if ((column_pos >= m_upper_bound) || column_pos < 0)
     {
       throw base_s3select_exception("column_position_is_wrong", base_s3select_exception::s3select_exp_en_t::ERROR);
@@ -285,7 +272,9 @@ class s3select_reserved_word
   {
     NA,
     S3S_NULL,//TODO check AWS defintions for reserve words, its a long list , what about functions-names? 
-    S3S_NAN 
+    S3S_NAN,
+    S3S_TRUE,
+    S3S_FALSE
   } ;
 
   using reserved_words = std::map<std::string,reserve_word_en_t>;
@@ -293,7 +282,9 @@ class s3select_reserved_word
   const reserved_words m_reserved_words=
   {
     {"null",reserve_word_en_t::S3S_NULL},{"NULL",reserve_word_en_t::S3S_NULL},
-    {"nan",reserve_word_en_t::S3S_NAN},{"NaN",reserve_word_en_t::S3S_NAN}
+    {"nan",reserve_word_en_t::S3S_NAN},{"NaN",reserve_word_en_t::S3S_NAN},
+    {"true",reserve_word_en_t::S3S_TRUE},{"TRUE",reserve_word_en_t::S3S_TRUE},
+    {"false",reserve_word_en_t::S3S_FALSE},{"FALSE",reserve_word_en_t::S3S_FALSE}
   };
 
   bool is_reserved_word(std::string & token)
@@ -450,6 +441,7 @@ public:
     TIMESTAMP,
     S3NULL,
     S3NAN,
+    BOOL,
     NA
   } ;
   value_En_t type;
@@ -505,6 +497,11 @@ public:
     return type == value_En_t::TIMESTAMP;
   }
 
+  bool is_bool() const
+  {
+    return type == value_En_t::BOOL;
+  }
+
   bool is_null() const
   {
     return type == value_En_t::S3NULL;
@@ -518,10 +515,27 @@ public:
     return type == value_En_t::S3NAN; 
   }
 
+  bool is_true()
+  {
+    return (i64()!=0 && !is_null());
+  }
+
   void set_nan() 
   {
     __val.dbl = NAN;
     type = value_En_t::FLOAT;
+  }
+
+  void set_true() 
+  {
+    __val.num = 1;
+    type = value_En_t::BOOL;
+  }
+
+  void set_false() 
+  {
+    __val.num = 0;
+    type = value_En_t::BOOL;
   }
 
   void setnull()
@@ -538,13 +552,24 @@ public:
       {
         m_to_string.assign( boost::lexical_cast<std::string>(__val.num) );
       }
+      if (type == value_En_t::BOOL)
+      {
+        if(__val.num == 0)
+        {
+          m_to_string.assign("false");
+        }
+        else
+        {
+          m_to_string.assign("true");
+        }
+      }
       else if(type == value_En_t::FLOAT)
       {
         m_to_string = boost::lexical_cast<std::string>(__val.dbl);
       }
       else if (type == value_En_t::TIMESTAMP)
       {
-        m_to_string =  to_simple_string( *__val.timestamp );
+        m_to_string =  to_iso_extended_string( *__val.timestamp );
       }
       else if (type == value_En_t::S3NULL)
       {
@@ -562,7 +587,7 @@ public:
 
   value& operator=(value& o)
   {
-    if(this->type == value_En_t::STRING)
+    if(o.type == value_En_t::STRING)
     {
       m_str_value.assign(o.str());
       __val.str = m_str_value.data();
@@ -605,7 +630,7 @@ public:
   value& operator=(bool b)
   {
     this->__val.num = (int64_t)b;
-    this->type = value_En_t::DECIMAL;
+    this->type = value_En_t::BOOL;
 
     return *this;
   }
@@ -679,10 +704,10 @@ public:
       return *timestamp() < *(v.timestamp());
     }
 
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    if(is_nan() || v.is_nan())
     {
       return false;
-    }
+    } 
 
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
   }
@@ -728,7 +753,7 @@ public:
       return *timestamp() > *(v.timestamp());
     }
 
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    if(is_nan() || v.is_nan())
     {
       return false;
     }
@@ -778,38 +803,49 @@ public:
       return *timestamp() == *(v.timestamp());
     }
 
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan()))
+    if(
+    (is_bool() && v.is_bool())
+    ||
+    (is_number() && v.is_bool())
+    ||
+    (is_bool() && v.is_number())
+    )
+    {
+      return __val.num == v.__val.num;
+    }
+
+    if (is_nan() || v.is_nan())
     {
       return false;
-    }
+    }  
 
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
   }
   bool operator<=(const value& v)
-  {
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+  { 
+    if (is_nan() || v.is_nan()) {
       return false;
-    } else {
+    } else { 
       return !(*this>v);
     } 
   }
   
   bool operator>=(const value& v)
-  {
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+  { 
+    if (is_nan() || v.is_nan()) {
       return false;
-    } else {
+    } else { 
       return !(*this<v);
     } 
   }
   
   bool operator!=(const value& v)
-  {
-    if ((is_null() || v.is_null()) || (is_nan() || v.is_nan())) {
+  { 
+    if (is_nan() || v.is_nan()) {
       return true;
-    } else {
+    } else { 
       return !(*this == v);
-      } 
+    }
   }
   
   template<typename binop> //conversion rules for arithmetical binary operations
@@ -821,6 +857,11 @@ public:
     {
       throw base_s3select_exception("illegal binary operation with string");
     }
+    if (l.is_bool() || r.is_bool())
+    {
+      throw base_s3select_exception("illegal binary operation with bool type");
+    }
+
     if (l.is_number() && r.is_number())
     {
       if (l.type != r.type)
@@ -855,10 +896,11 @@ public:
     }
   }
     
-    if ((l.is_null() || r.is_null()) || (l.is_nan() || r.is_nan()))
+    if (l.is_null() || r.is_null()) 
     {
+      l.setnull();
+    } else if(l.is_nan() || r.is_nan()) {
       l.set_nan();
-      return l;
     }
 
     return l;
@@ -885,10 +927,10 @@ public:
     return compute<binop_mult>(*this, v);
   }
   
-  value& operator/(value& v)  // TODO  handle division by zero
+  value& operator/(value& v)
   {
     if (v.is_null() || this->is_null()) {
-      v.set_nan();
+      v.setnull();
       return v;
     } else {
       return compute<binop_div>(*this, v);
@@ -922,15 +964,43 @@ protected:
   value m_alias_result;
   base_statement* m_projection_alias;
   int m_eval_stack_depth;
+  bool m_skip_non_aggregate_op;
+  value value_na;
 
 public:
-  base_statement():m_scratch(0), is_last_call(false), m_is_cache_result(false), m_projection_alias(0), m_eval_stack_depth(0) {}
-  virtual value& eval() =0;
-  virtual base_statement* left()
+  base_statement():m_scratch(nullptr), is_last_call(false), m_is_cache_result(false),
+  m_projection_alias(nullptr), m_eval_stack_depth(0), m_skip_non_aggregate_op(false) {}
+
+  virtual value& eval()
+  {
+    //purpose: on aggregation flow to run only the correct subtree(aggregation subtree)
+     
+    if (m_skip_non_aggregate_op == false)
+      return eval_internal();//not skipping this node.
+    else
+    {
+    //skipping this node.
+    //in case execution should skip a node, it will traverse (left and right) 
+    //and search for subtree to execute.   
+    //example: sum( ... ) - sum( ... ) ; the minus operand is skipped while sum() operand is not.
+    if(left())
+      left()->eval_internal();
+    
+    if(right())
+      right()->eval_internal();
+    
+    }
+
+    return value_na;
+  }
+
+  virtual value& eval_internal() = 0;
+  
+  virtual base_statement* left() const
   {
     return 0;
   }
-  virtual base_statement* right()
+  virtual base_statement* right() const
   {
     return 0;
   }
@@ -951,20 +1021,47 @@ public:
     }
   }
 
-  virtual bool is_aggregate()
+  virtual void set_skip_non_aggregate(bool skip_non_aggregate_op)
   {
-    return false;
+    m_skip_non_aggregate_op = skip_non_aggregate_op;
+
+    if (left())
+    {
+      left()->set_skip_non_aggregate(m_skip_non_aggregate_op);
+    }
+    if (right())
+    {
+      right()->set_skip_non_aggregate(m_skip_non_aggregate_op);
+    }
   }
-  virtual bool is_column()
+
+  virtual bool is_aggregate() const
   {
     return false;
   }
 
-  bool is_function();
-  bool is_aggregate_exist_in_expression(base_statement* e);//TODO obsolete ?
-  base_statement* get_aggregate();
-  bool is_nested_aggregate(base_statement* e);
-  bool is_binop_aggregate_and_column(base_statement* skip);
+  virtual bool is_column() const
+  {
+    return false;
+  }
+
+  virtual void resolve_node()
+  {//part of semantic analysis(TODO maybe semantic method should handle this)
+    if (left())
+    {
+      left()->resolve_node();
+    }
+    if (right())
+    {
+      right()->resolve_node();
+    }
+  }
+
+  bool is_function() const;
+  const base_statement* get_aggregate() const;
+  bool is_nested_aggregate(bool&) const;
+  bool is_column_reference() const;
+  bool mark_aggreagtion_subtree_to_execute();
 
   virtual void set_last_call()
   {
@@ -1100,6 +1197,18 @@ public:
       column_pos = -1;
       var_value.set_nan();
     }
+    else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_TRUE)
+    {
+      m_var_type = variable::var_t::COL_VALUE;
+      column_pos = -1;
+      var_value.set_true();
+    }
+    else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_FALSE)
+    {
+      m_var_type = variable::var_t::COL_VALUE;
+      column_pos = -1;
+      var_value.set_false();
+    }
     else 
     {
       _name = "#";
@@ -1133,6 +1242,12 @@ public:
     var_value = p;
   }
 
+  void set_value(bool b)
+  {
+  	var_value = b;
+    var_value.type = value::value_En_t::BOOL;
+  }
+
   void set_null()
   {
     var_value.setnull();
@@ -1140,7 +1255,7 @@ public:
 
   virtual ~variable() {}
 
-  virtual bool is_column()  //is reference to column.
+  virtual bool is_column() const //is reference to column.
   {
     if(m_var_type == var_t::VAR || m_var_type == var_t::POS)
     {
@@ -1193,7 +1308,7 @@ public:
     return var_value;
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     if (m_var_type == var_t::COL_VALUE)
     {
@@ -1251,6 +1366,9 @@ public:
     else
     {
       var_value = (char*)m_scratch->get_column_value(column_pos).data();  //no allocation. returning pointer of allocated space
+      //in the case of successive column-delimiter {1,some_data,,3}=> third column is NULL 
+      if (*var_value.str()== 0)
+          var_value.setnull();
     }
 
     return var_value;
@@ -1292,11 +1410,11 @@ public:
     return true;
   }
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1308,9 +1426,16 @@ public:
     return std::string("#");//TBD
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
-
+    if ((l->eval()).is_null()) {//TODO l/r->eval() run twice 
+        var_value.setnull();
+        return var_value;
+      } else if((r->eval()).is_null()) {
+        var_value.setnull();
+        return var_value;
+      }
+    
     switch (_cmp)
     {
     case cmp_t::EQ:
@@ -1374,11 +1499,11 @@ private:
 
 public:
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1407,7 +1532,7 @@ public:
     //return out;
     return std::string("#");//TBD
   }
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     bool res;
     if (!l || !r)
@@ -1417,33 +1542,44 @@ public:
     value a = l->eval();
     if (_oplog == oplog_t::AND)
     {
-      if (a.i64() == false)
-      {
+      if (!a.is_null() && a.i64() == false) {
         res = false ^ negation_result;
         return var_value = res;
       } 
       value b = r->eval();
-      if (a.is_null() || b.is_null()) {
-        var_value.setnull();
+      if(!b.is_null() && b.i64() == false) {
+        res = false ^ negation_result;
+        return var_value = res;
       } else {
-        res =  (a.i64() && b.i64()) ^ negation_result ;
-      }
+        if (a.is_null() || b.is_null()) {
+          var_value.setnull();
+          return var_value;
+        } else {
+          res =  true ^ negation_result ;
+          return var_value =res;
+        }
+      }   
     }
     else
     {
-      if (a.i64() == true)
-      {
+      if (a.is_true()) {
         res = true ^ negation_result;
         return var_value = res;
-      }
+      } 
       value b = r->eval();
-      if (a.is_null() || b.is_null()) {
-        var_value.setnull();
+      if(b.is_true() == true) {
+        res = true ^ negation_result;
+        return var_value = res;
       } else {
-        res =  (a.i64() || b.i64()) ^ negation_result;
+        if (a.is_null() || b.is_null()) {
+          var_value.setnull();
+          return var_value;
+        } else {
+          res =  false ^ negation_result ;
+          return var_value =res;
+        }
       }
     }
-    return var_value = res;
   }
 };
 
@@ -1452,7 +1588,7 @@ class mulldiv_operation : public base_statement
 
 public:
 
-  enum class muldiv_t {NA, MULL, DIV, POW,MOD} ;
+  enum class muldiv_t {NA, MULL, DIV, POW, MOD} ;
 
 private:
   base_statement* l;
@@ -1460,14 +1596,15 @@ private:
 
   muldiv_t _mulldiv;
   value var_value;
+  value tmp_value;
 
 public:
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1484,24 +1621,28 @@ public:
     return std::string("#");//TBD
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     switch (_mulldiv)
     {
     case muldiv_t::MULL:
-      return var_value = l->eval() * r->eval();
+      tmp_value = l->eval();//TODO why tmp_value?
+      return var_value = tmp_value * r->eval();
       break;
 
     case muldiv_t::DIV:
-      return var_value = l->eval() / r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value / r->eval();
       break;
 
     case muldiv_t::POW:
-      return var_value = l->eval() ^ r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value ^ r->eval();
       break;
 
     case muldiv_t::MOD:
-      return var_value = l->eval() % r->eval();
+      tmp_value = l->eval();
+      return var_value = tmp_value % r->eval();
       break;
 
     default:
@@ -1528,14 +1669,15 @@ private:
 
   addsub_op_t _op;
   value var_value;
+  value tmp_value;
 
 public:
 
-  virtual base_statement* left()
+  base_statement* left() const override
   {
     return l;
   }
-  virtual base_statement* right()
+  base_statement* right() const override
   {
     return r;
   }
@@ -1555,7 +1697,7 @@ public:
     return std::string("#");//TBD
   }
 
-  virtual value& eval()
+  virtual value& eval_internal()
   {
     if (_op == addsub_op_t::NA) // -num , +num , unary-operation on number
     {
@@ -1569,16 +1711,65 @@ public:
       }
     }
     else if (_op == addsub_op_t::ADD)
-    {
-      return var_value = (l->eval() + r->eval());
+    {tmp_value=l->eval();//TODO why tmp_value?
+      return var_value = (tmp_value + r->eval());
     }
     else
-    {
-      return var_value = (l->eval() - r->eval());
+    {tmp_value=l->eval();
+      return var_value = (tmp_value - r->eval());
     }
 
     return var_value;
   }
+};
+
+class negate_function_operation : public base_statement
+{
+  //purpose: some functions (between,like,in) are participating in where-clause as predicates; thus NOT unary-operator may operate on them.
+
+  private:
+  
+  base_statement* function_to_negate;
+  value res;
+  
+  public:
+
+  negate_function_operation(base_statement *f):function_to_negate(f){}
+
+  virtual std::string print(int ident)
+  {
+    return std::string("#");//TBD
+  }
+
+  virtual bool semantic()
+  {
+    return true;
+  }
+
+  base_statement* left() const override
+  {
+    return function_to_negate;
+  }
+
+  virtual value& eval_internal()
+  {
+    res = function_to_negate->eval();
+
+    if (res.is_number() || res.is_bool())//TODO is integer type
+    {
+      if (res.is_true())
+      {
+        res = (bool)0;
+      }
+      else
+      {
+        res = (bool)1;
+      }
+    }
+
+    return res;
+  }
+
 };
 
 class base_function
@@ -1592,20 +1783,126 @@ public:
   // validate semantic on creation instead on run-time
   virtual bool operator()(bs_stmt_vec_t* args, variable* result) = 0;
   base_function() : aggregate(false) {}
-  bool is_aggregate()
+  bool is_aggregate() const
   {
     return aggregate == true;
   }
   virtual void get_aggregate_result(variable*) {}
 
-  virtual ~base_function() {}
+  virtual ~base_function() = default;
   
   virtual void dtor()
   {//release function-body implementation 
     this->~base_function();
   }
+
 };
 
+class base_date_extract : public base_function
+{
+  protected:
+    value val_timestamp;
+    boost::posix_time::ptime new_ptime;
+
+  public:
+    void param_validation(bs_stmt_vec_t*& args)
+    {
+      auto iter = args->begin();
+      int args_size = args->size();
+
+      if (args_size < 1)
+      {
+        throw base_s3select_exception("to_timestamp should have 2 parameters");
+      }
+
+      base_statement* ts = *iter;
+      val_timestamp = ts->eval();
+      if(val_timestamp.is_timestamp()== false)
+      {
+        throw base_s3select_exception("second parameter is not timestamp");
+      }
+
+      new_ptime = *val_timestamp.timestamp();
+    }
+
+};
+
+class base_date_diff : public base_function
+{
+  protected:
+    value val_ts1;
+    value val_ts2;
+
+  public:
+    void param_validation(bs_stmt_vec_t*& args)
+    {
+      auto iter = args->begin();
+      int args_size = args->size();
+
+      if (args_size < 2)
+      {
+        throw base_s3select_exception("datediff need 3 parameters");
+      }
+
+      base_statement* dt1_param = *iter;
+      val_ts1 = dt1_param->eval();
+
+      if (val_ts1.is_timestamp() == false)
+      {
+        throw base_s3select_exception("second parameter should be timestamp");
+      }
+
+      iter++;
+      base_statement* dt2_param = *iter;
+      val_ts2 = dt2_param->eval();
+
+      if (val_ts2.is_timestamp() == false)
+      {
+        throw base_s3select_exception("third parameter should be timestamp");
+      }
+    }
+
+};
+
+class base_date_add : public base_function
+{
+  protected:
+    value val_quantity;
+    value val_ts;
+    boost::posix_time::ptime new_ptime;
+
+  public:
+    void param_validation(bs_stmt_vec_t*& args)
+    {
+      auto iter = args->begin();
+      int args_size = args->size();
+
+      if (args_size < 2)
+      {
+        throw base_s3select_exception("add_to_timestamp should have 3 parameters");
+      }
+
+      base_statement* quan = *iter;
+      val_quantity = quan->eval();
+
+      if (val_quantity.is_number() == false)
+      {
+        throw base_s3select_exception("second parameter should be number");  //TODO what about double?
+      }
+
+      iter++;
+      base_statement* ts = *iter;
+      val_ts = ts->eval();
+
+      if(val_ts.is_timestamp() == false)
+      {
+        throw base_s3select_exception("third parameter should be time-stamp");
+      }
+
+      new_ptime = *val_ts.timestamp();
+    }
+
+};
 
 };//namespace
 

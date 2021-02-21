@@ -30,19 +30,6 @@ private:
   std::vector<base_statement*> m_projections;
 
 public:
-  bool is_aggregate()
-  {
-    //TODO iterate on projections , and search for aggregate
-    //for(auto p : m_projections){}
-
-    return false;
-  }
-
-  bool semantic()
-  {
-    //TODO check aggragtion function are not nested
-    return false;
-  }
 
   std::vector<base_statement*>* get()
   {
@@ -65,147 +52,323 @@ struct actionQ
   std::vector<logical_operand::oplog_t> logical_compareQ;
   std::vector<base_statement*> exprQ;
   std::vector<base_statement*> funcQ;
-  std::vector<base_statement*> condQ;
+  std::vector<base_statement*> whenThenQ;
+  std::vector<base_statement*> inPredicateQ;
+  base_statement* inMainArg;
+  std::vector<std::string> dataTypeQ;
+  std::vector<std::string> trimTypeQ;
+  std::vector<std::string> datePartQ;
+  std::vector<base_statement*> caseValueQ;
   projection_alias alias_map;
   std::string from_clause;
-  std::vector<std::string> schema_columns;
   s3select_projections  projections;
+
+
+  size_t when_then_count;
+
+  actionQ(): inMainArg(0),from_clause("##"),when_then_count(0){}//TODO remove when_then_count
+
+  std::map<const void*,std::vector<const char*> *> x_map;
+
+  ~actionQ()
+  {
+    for(auto m : x_map)
+      delete m.second;
+  }
+  
+  bool is_already_scanned(const void *th,const char *a)
+  {
+    //purpose: caller get indication in the case a specific builder is scan more than once the same text(pointer)
+    auto t = x_map.find(th);
+
+    if(t == x_map.end())
+    {
+      auto v = new std::vector<const char*>;//TODO delete 
+      x_map.insert(std::pair<const void*,std::vector<const char*> *>(th,v));
+      v->push_back(a);
+    }
+    else
+    {
+      for(auto& c : *(t->second))
+      {
+        if( strcmp(c,a) == 0)
+          return true;
+      }
+      t->second->push_back(a);
+    }
+    return false;
+  }
 
 };
 
 class s3select;
 
-struct push_from_clause
+struct base_ast_builder
 {
   void operator()(s3select* self, const char* a, const char* b) const;
+
+  virtual void builder(s3select* self, const char* a, const char* b) const = 0;
+  
+  virtual ~base_ast_builder() = default;
+};
+
+struct push_from_clause : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_from_clause g_push_from_clause;
 
-struct push_number
+struct push_number : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_number g_push_number;
 
-struct push_float_number
+struct push_float_number : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_float_number g_push_float_number;
 
-struct push_string
+struct push_string : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_string g_push_string;
 
-struct push_variable
+struct push_variable : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_variable g_push_variable;
 
 /////////////////////////arithmetic unit  /////////////////
-struct push_addsub
+struct push_addsub : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_addsub g_push_addsub;
 
-struct push_mulop
+struct push_mulop : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_mulop g_push_mulop;
 
-struct push_addsub_binop
+struct push_addsub_binop : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_addsub_binop g_push_addsub_binop;
 
-struct push_mulldiv_binop
+struct push_mulldiv_binop : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_mulldiv_binop g_push_mulldiv_binop;
 
-struct push_function_arg
+struct push_function_arg : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_function_arg g_push_function_arg;
 
-struct push_function_name
+struct push_function_name : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_function_name g_push_function_name;
 
-struct push_function_expr
+struct push_function_expr : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_function_expr g_push_function_expr;
 
+struct push_cast_expr : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_cast_expr g_push_cast_expr;
+
+struct push_data_type : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_data_type g_push_data_type;
+
 ////////////////////// logical unit ////////////////////////
 
-struct push_compare_operator
+struct push_compare_operator : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 
 };
 static push_compare_operator g_push_compare_operator;
 
-struct push_logical_operator
+struct push_logical_operator : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 
 };
 static push_logical_operator g_push_logical_operator;
 
-struct push_arithmetic_predicate
+struct push_arithmetic_predicate : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 
 };
 static push_arithmetic_predicate g_push_arithmetic_predicate;
 
-struct push_logical_predicate
+struct push_logical_predicate : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_logical_predicate g_push_logical_predicate;
 
-struct push_negation
+struct push_negation : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_negation g_push_negation;
 
-struct push_column_pos
+struct push_column_pos : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static  push_column_pos g_push_column_pos;
 
-struct push_projection
+struct push_projection : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_projection g_push_projection;
 
-struct push_alias_projection
+struct push_alias_projection : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
 static push_alias_projection g_push_alias_projection;
 
-struct push_debug_1
+struct push_between_filter : public base_ast_builder
 {
-  void operator()(s3select* self, const char* a, const char* b) const;
+  void builder(s3select* self, const char* a, const char* b) const;
 };
-static push_debug_1 g_push_debug_1;
+static push_between_filter g_push_between_filter;
+
+struct push_in_predicate : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate g_push_in_predicate;
+
+struct push_in_predicate_arguments : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate_arguments g_push_in_predicate_arguments;
+
+struct push_in_predicate_first_arg : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_in_predicate_first_arg g_push_in_predicate_first_arg;
+
+struct push_like_predicate : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_like_predicate g_push_like_predicate;
+
+struct push_is_null_predicate : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_is_null_predicate g_push_is_null_predicate;
+
+struct push_case_when_else : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_case_when_else g_push_case_when_else;
+
+struct push_when_condition_then : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_when_condition_then g_push_when_condition_then;
+
+struct push_when_value_then : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_when_value_then g_push_when_value_then;
+
+struct push_case_value : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_case_value g_push_case_value;
+
+struct push_substr_from : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_substr_from g_push_substr_from;
+
+struct push_substr_from_for : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_substr_from_for g_push_substr_from_for;
+
+struct push_trim_type : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_trim_type g_push_trim_type; 
+
+struct push_trim_whitespace_both : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_trim_whitespace_both g_push_trim_whitespace_both;
+
+struct push_trim_expr_one_side_whitespace : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_trim_expr_one_side_whitespace g_push_trim_expr_one_side_whitespace;
+
+struct push_trim_expr_anychar_anyside : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_trim_expr_anychar_anyside g_push_trim_expr_anychar_anyside;
+
+struct push_datediff : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_datediff g_push_datediff;
+
+struct push_dateadd : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_dateadd g_push_dateadd;
+
+struct push_extract : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_extract g_push_extract;
+
+struct push_date_part : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_date_part g_push_date_part;
 
 struct s3select : public bsc::grammar<s3select>
 {
@@ -244,34 +407,42 @@ public:
 
   int semantic()
   {
-    for (auto e : get_projections_list())
+    for (const auto &e : get_projections_list())
     {
-      base_statement* aggr = 0;
-
-      if ((aggr = e->get_aggregate()) != 0)
+      e->resolve_node();
+      //upon validate there is no aggregation-function nested calls, it validates legit aggregation call. 
+      if (e->is_nested_aggregate(aggr_flow))
       {
-        if (aggr->is_nested_aggregate(aggr))
-        {
-          error_description = "nested aggregation function is illegal i.e. sum(...sum ...)";
-          throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
-        }
-
-        aggr_flow = true;
+        error_description = "nested aggregation function is illegal i.e. sum(...sum ...)";
+        throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
       }
     }
 
     if (aggr_flow == true)
-      for (auto e : get_projections_list())
+    {// atleast one projection column contain aggregation function
+      for (const auto &e : get_projections_list())
       {
-        base_statement* skip_expr = e->get_aggregate();
+        auto aggregate_expr = e->get_aggregate();
 
-        if (e->is_binop_aggregate_and_column(skip_expr))
+        if (aggregate_expr)
         {
-          error_description = "illegal expression. /select sum(c1) + c1 ..../ is not allow type of query";
-          throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
+          //per each column, subtree is mark to skip except for the aggregation function subtree. 
+          //for an example: substring( ... , sum() , count() ) :: the substring is mark to skip execution, while sum and count not.
+          e->set_skip_non_aggregate(true);
+          e->mark_aggreagtion_subtree_to_execute();
         }
+        else
+        {
+          //in case projection column is not aggregate, the projection column must *not* contain reference to columns.
+          if(e->is_column_reference())
+          {
+            error_description = "illegal query; projection contains aggregation function is not allowed with projection contains column reference";
+            throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
+          }
+        }
+        
       }
-
+    }
     return 0;
   }
 
@@ -330,7 +501,7 @@ public:
     return  cond->semantic();
   }
 
-  std::string get_from_clause()
+  std::string get_from_clause() const
   {
     return m_actionQ.from_clause;
   }
@@ -338,7 +509,7 @@ public:
   void load_schema(std::vector< std::string>& scm)
   {
     int i = 0;
-    for (auto c : scm)
+    for (auto& c : scm)
     {
       m_sca.set_column_pos(c.c_str(), i++);
     }
@@ -346,12 +517,12 @@ public:
 
   base_statement* get_filter()
   {
-    if(m_actionQ.condQ.size()==0)
+    if(m_actionQ.exprQ.empty())
     {
-      return NULL;
+      return nullptr;
     }
 
-    return m_actionQ.condQ.back();
+    return m_actionQ.exprQ.back();
   }
 
   std::vector<base_statement*>  get_projections_list()
@@ -369,7 +540,7 @@ public:
     return &m_actionQ.alias_map;
   }
 
-  bool is_aggregate_query()
+  bool is_aggregate_query() const
   {
     return aggr_flow == true;
   }
@@ -383,7 +554,7 @@ public:
   template <typename ScannerT>
   struct definition
   {
-    definition(s3select const& self)
+    explicit definition(s3select const& self)
     {
       ///// s3select syntax rules and actions for building AST
 
@@ -391,12 +562,24 @@ public:
 
       projections = projection_expression >> *( ',' >> projection_expression) ;
 
-      projection_expression = (arithmetic_expression >> bsc::str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] | (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)]  ;
+      projection_expression = (when_case_else_projection|when_case_value_when) [BOOST_BIND_ACTION(push_projection)] | 
+                              (arithmetic_expression >> bsc::str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] | 
+                              (arithmetic_expression)[BOOST_BIND_ACTION(push_projection)] | 
+			      (arithmetic_predicate >> bsc::str_p("as") >> alias_name)[BOOST_BIND_ACTION(push_alias_projection)] |
+                              (arithmetic_predicate)[BOOST_BIND_ACTION(push_projection)] ;
 
       alias_name = bsc::lexeme_d[(+bsc::alpha_p >> *bsc::digit_p)] ;
 
+      when_case_else_projection = (bsc::str_p("case")  >> (+when_stmt) >> bsc::str_p("else") >> arithmetic_expression >> bsc::str_p("end")) [BOOST_BIND_ACTION(push_case_when_else)];
 
-      s3_object = bsc::str_p("stdin") | object_path ;
+      when_stmt = (bsc::str_p("when") >> condition_expression >> bsc::str_p("then") >> arithmetic_expression)[BOOST_BIND_ACTION(push_when_condition_then)];
+
+      when_case_value_when = (bsc::str_p("case") >> arithmetic_expression[BOOST_BIND_ACTION(push_case_value)]  >> 
+                              (+when_value_then) >> bsc::str_p("else") >> arithmetic_expression >> bsc::str_p("end")) [BOOST_BIND_ACTION(push_case_when_else)];
+
+      when_value_then = (bsc::str_p("when") >> arithmetic_expression >> bsc::str_p("then") >> arithmetic_expression)[BOOST_BIND_ACTION(push_when_value_then)];
+
+      s3_object = bsc::str_p("stdin") | bsc::str_p("s3object")  | object_path ;
 
       object_path = "/" >> *( fs_type >> "/") >> fs_type;
 
@@ -404,13 +587,29 @@ public:
 
       where_clause = bsc::str_p("where") >> condition_expression;
 
-      condition_expression =  ( bsc::str_p("not") >> binary_condition )[BOOST_BIND_ACTION(push_negation)] | binary_condition;
+      condition_expression = arithmetic_predicate;
 
-      binary_condition = (arithmetic_predicate >> *(log_op[BOOST_BIND_ACTION(push_logical_operator)] >> arithmetic_predicate[BOOST_BIND_ACTION(push_logical_predicate)]));
+      arithmetic_predicate = (bsc::str_p("not") >> logical_predicate)[BOOST_BIND_ACTION(push_negation)] | logical_predicate;
 
-      arithmetic_predicate = (factor >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> factor[BOOST_BIND_ACTION(push_arithmetic_predicate)]));
+      logical_predicate =  (logical_and) >> *(or_op[BOOST_BIND_ACTION(push_logical_operator)] >> (logical_and)[BOOST_BIND_ACTION(push_logical_predicate)]);
 
-      factor = (arithmetic_expression) | ('(' >> condition_expression >> ')') ;
+      logical_and =  (cmp_operand) >> *(and_op[BOOST_BIND_ACTION(push_logical_operator)] >> (cmp_operand)[BOOST_BIND_ACTION(push_logical_predicate)]);
+
+      cmp_operand = special_predicates | (factor) >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> (factor)[BOOST_BIND_ACTION(push_arithmetic_predicate)]);
+
+      special_predicates = (is_null) | (is_not_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
+
+      is_null = ((factor) >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+
+      is_not_null = ((factor) >> bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
+
+      between_predicate = (arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression)[BOOST_BIND_ACTION(push_between_filter)];
+
+      in_predicate = (arithmetic_expression >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_first_arg)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_arguments)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
+
+      like_predicate = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate)];
+
+      factor = arithmetic_expression  | ( '(' >> arithmetic_predicate >> ')' ) ; 
 
       arithmetic_expression = (addsub_operand >> *(addsubop_operator[BOOST_BIND_ACTION(push_addsub)] >> addsub_operand[BOOST_BIND_ACTION(push_addsub_binop)] ));
 
@@ -419,18 +618,51 @@ public:
       mulldiv_operand = arithmetic_argument | ('(' >> (arithmetic_expression) >> ')') ;
 
       list_of_function_arguments = (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)] >> *(',' >> (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)]);
+      
       function = ((variable >> '(' )[BOOST_BIND_ACTION(push_function_name)] >> !list_of_function_arguments >> ')')[BOOST_BIND_ACTION(push_function_expr)];
 
       arithmetic_argument = (float_number)[BOOST_BIND_ACTION(push_float_number)] |  (number)[BOOST_BIND_ACTION(push_number)] | (column_pos)[BOOST_BIND_ACTION(push_column_pos)] |
-                            (string)[BOOST_BIND_ACTION(push_string)] |
-                            (function)[BOOST_BIND_ACTION(push_debug_1)]  | (variable)[BOOST_BIND_ACTION(push_variable)] ;//function is pushed by right-term
+                            (string)[BOOST_BIND_ACTION(push_string)] | (datediff) | (dateadd) | (extract) |
+                            (cast) | (substr) | (trim) |
+                            (function) | (variable)[BOOST_BIND_ACTION(push_variable)]; //function is pushed by right-term
 
+      cast = (bsc::str_p("cast") >> '(' >> arithmetic_expression >> bsc::str_p("as") >> (data_type)[BOOST_BIND_ACTION(push_data_type)] >> ')') [BOOST_BIND_ACTION(push_cast_expr)];
+
+      data_type = (bsc::str_p("int") | bsc::str_p("float") | bsc::str_p("string") |  bsc::str_p("timestamp") | bsc::str_p("bool") );
+     
+      substr = (substr_from) | (substr_from_for);
+      
+      substr_from = (bsc::str_p("substring") >> '(' >> (arithmetic_expression >> bsc::str_p("from") >> arithmetic_expression) >> ')') [BOOST_BIND_ACTION(push_substr_from)];
+
+      substr_from_for = (bsc::str_p("substring") >> '(' >> (arithmetic_expression >> bsc::str_p("from") >> arithmetic_expression >> bsc::str_p("for") >> arithmetic_expression) >> ')') [BOOST_BIND_ACTION(push_substr_from_for)];
+      
+      trim = (trim_whitespace_both) | (trim_one_side_whitespace) | (trim_anychar_anyside);
+
+      trim_one_side_whitespace = (bsc::str_p("trim") >> '(' >> (trim_type)[BOOST_BIND_ACTION(push_trim_type)] >> arithmetic_expression >> ')') [BOOST_BIND_ACTION(push_trim_expr_one_side_whitespace)];
+
+      trim_whitespace_both = (bsc::str_p("trim") >> '(' >> arithmetic_expression >> ')') [BOOST_BIND_ACTION(push_trim_whitespace_both)];
+
+      trim_anychar_anyside = (bsc::str_p("trim") >> '(' >> ((trim_remove_type)[BOOST_BIND_ACTION(push_trim_type)] >> arithmetic_expression >> bsc::str_p("from") >> arithmetic_expression)  >> ')') [BOOST_BIND_ACTION(push_trim_expr_anychar_anyside)];
+      
+      trim_type = ((bsc::str_p("leading") >> bsc::str_p("from")) | ( bsc::str_p("trailing") >> bsc::str_p("from")) | (bsc::str_p("both") >> bsc::str_p("from")) | bsc::str_p("from") ); 
+
+      trim_remove_type = (bsc::str_p("leading") | bsc::str_p("trailing") | bsc::str_p("both") );
+
+      datediff = (bsc::str_p("date_diff") >> '(' >> date_part >> ',' >> arithmetic_expression >> ',' >> arithmetic_expression >> ')') [BOOST_BIND_ACTION(push_datediff)];
+
+      dateadd = (bsc::str_p("date_add") >> '(' >> date_part >> ',' >> arithmetic_expression >> ',' >> arithmetic_expression >> ')') [BOOST_BIND_ACTION(push_dateadd)];
+
+      extract = (bsc::str_p("extract") >> '(' >> (date_part_extract)[BOOST_BIND_ACTION(push_date_part)] >> bsc::str_p("from") >> arithmetic_expression >> ')') [BOOST_BIND_ACTION(push_extract)];
+
+      date_part = (bsc::str_p("year") | bsc::str_p("month") | bsc::str_p("day") | bsc::str_p("hour")  | bsc::str_p("minute") | bsc::str_p("second")) [BOOST_BIND_ACTION(push_date_part)];
+
+      date_part_extract = ((date_part) |  bsc::str_p("week"));
 
       number = bsc::int_p;
 
       float_number = bsc::real_p;
 
-      string = bsc::str_p("\"") >> *( bsc::anychar_p - bsc::str_p("\"") ) >> bsc::str_p("\"") ;
+      string = (bsc::str_p("\"") >> *( bsc::anychar_p - bsc::str_p("\"") ) >> bsc::str_p("\"")) | (bsc::str_p("\'") >> *( bsc::anychar_p - bsc::str_p("\'") ) >> bsc::str_p("\'")) ;
 
       column_pos = ('_'>>+(bsc::digit_p) ) | '*' ;
 
@@ -438,19 +670,26 @@ public:
 
       addsubop_operator = bsc::str_p("+") | bsc::str_p("-");
 
-
       arith_cmp = bsc::str_p(">=") | bsc::str_p("<=") | bsc::str_p("==") | bsc::str_p("<") | bsc::str_p(">") | bsc::str_p("!=");
 
-      log_op = bsc::str_p("and") | bsc::str_p("or");
+      and_op =  bsc::str_p("and");
 
-      variable =  bsc::lexeme_d[(+bsc::alpha_p >> *bsc::digit_p)];
+      or_op =  bsc::str_p("or");
+
+      variable =  bsc::lexeme_d[(+bsc::alpha_p >> *( bsc::alpha_p | bsc::digit_p | '_') ) -  bsc::str_p("not")] ;
     }
 
 
-    bsc::rule<ScannerT> variable, select_expr, s3_object, where_clause, number, float_number, string, arith_cmp, log_op, condition_expression, binary_condition, arithmetic_predicate, factor;
+    bsc::rule<ScannerT> cast, data_type, variable,  select_expr, s3_object, where_clause, number, float_number, string;
+    bsc::rule<ScannerT> cmp_operand, arith_cmp, condition_expression, arithmetic_predicate, logical_predicate, factor; 
+    bsc::rule<ScannerT> trim, trim_whitespace_both, trim_one_side_whitespace, trim_anychar_anyside, trim_type, trim_remove_type, substr, substr_from, substr_from_for;
+    bsc::rule<ScannerT> datediff, dateadd, extract, date_part, date_part_extract;
+    bsc::rule<ScannerT> special_predicates, between_predicate, in_predicate, like_predicate, is_null, is_not_null;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
+    bsc::rule<ScannerT> when_case_else_projection, when_case_value_when, when_stmt, when_value_then;
+    bsc::rule<ScannerT> logical_and,and_op,or_op;
     bsc::rule<ScannerT> const& start() const
     {
       return select_expr;
@@ -458,14 +697,27 @@ public:
   };
 };
 
-void push_from_clause::operator()(s3select* self, const char* a, const char* b) const
+void base_ast_builder::operator()(s3select *self, const char *a, const char *b) const
+{
+  //the purpose of the following procedure is to bypass boost::spirit rescan (calling to bind-action more than once per the same text)
+  //which cause wrong AST creation (and later false execution).
+  if (self->getAction()->is_already_scanned((void *)(this), const_cast<char *>(a)))
+    return;
+
+  builder(self, a, b);
+}
+
+void push_from_clause::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
   self->getAction()->from_clause = token;
+
+  self->getAction()->exprQ.clear();
+
 }
 
-void push_number::operator()(s3select* self, const char* a, const char* b) const
+void push_number::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
@@ -474,7 +726,7 @@ void push_number::operator()(s3select* self, const char* a, const char* b) const
   self->getAction()->exprQ.push_back(v);
 }
 
-void push_float_number::operator()(s3select* self, const char* a, const char* b) const
+void push_float_number::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
@@ -497,7 +749,7 @@ void push_float_number::operator()(s3select* self, const char* a, const char* b)
   }
 }
 
-void push_string::operator()(s3select* self, const char* a, const char* b) const
+void push_string::builder(s3select* self, const char* a, const char* b) const
 {
   a++;
   b--; // remove double quotes
@@ -508,11 +760,11 @@ void push_string::operator()(s3select* self, const char* a, const char* b) const
   self->getAction()->exprQ.push_back(v);
 }
 
-void push_variable::operator()(s3select* self, const char* a, const char* b) const
+void push_variable::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  variable* v = 0;
+  variable* v = nullptr;
 
   if (g_s3select_reserve_word.is_reserved_word(token))
   {
@@ -523,6 +775,14 @@ void push_variable::operator()(s3select* self, const char* a, const char* b) con
     else if (g_s3select_reserve_word.get_reserved_word(token) == s3select_reserved_word::reserve_word_en_t::S3S_NAN)
     {
       v = S3SELECT_NEW(self, variable, s3select_reserved_word::reserve_word_en_t::S3S_NAN);
+    }
+    else if (g_s3select_reserve_word.get_reserved_word(token) == s3select_reserved_word::reserve_word_en_t::S3S_FALSE)
+    {
+      v = S3SELECT_NEW(self, variable, s3select_reserved_word::reserve_word_en_t::S3S_FALSE);
+    }
+    else if (g_s3select_reserve_word.get_reserved_word(token) == s3select_reserved_word::reserve_word_en_t::S3S_TRUE)
+    {
+      v = S3SELECT_NEW(self, variable, s3select_reserved_word::reserve_word_en_t::S3S_TRUE);
     }
     else
     {
@@ -538,11 +798,11 @@ void push_variable::operator()(s3select* self, const char* a, const char* b) con
   self->getAction()->exprQ.push_back(v);
 }
 
-void push_addsub::operator()(s3select* self, const char* a, const char* b) const
+void push_addsub::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  if (token.compare("+") == 0)
+  if (token == "+")
   {
     self->getAction()->addsubQ.push_back(addsub_operation::addsub_op_t::ADD);
   }
@@ -552,19 +812,19 @@ void push_addsub::operator()(s3select* self, const char* a, const char* b) const
   }
 }
 
-void push_mulop::operator()(s3select* self, const char* a, const char* b) const
+void push_mulop::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  if (token.compare("*") == 0)
+  if (token == "*")
   {
     self->getAction()->muldivQ.push_back(mulldiv_operation::muldiv_t::MULL);
   }
-  else if (token.compare("/") == 0)
+  else if (token == "/")
   {
     self->getAction()->muldivQ.push_back(mulldiv_operation::muldiv_t::DIV);
   }
-  else if(token.compare("^") == 0)
+  else if(token == "^")
   {
     self->getAction()->muldivQ.push_back(mulldiv_operation::muldiv_t::POW);
   }
@@ -574,9 +834,9 @@ void push_mulop::operator()(s3select* self, const char* a, const char* b) const
   }
 }
 
-void push_addsub_binop::operator()(s3select* self, const char* a, const char* b) const
+void push_addsub_binop::builder(s3select* self, [[maybe_unused]] const char* a,[[maybe_unused]] const char* b) const
 {
-  base_statement* l = 0, *r = 0;
+  base_statement* l = nullptr, *r = nullptr;
 
   r = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
@@ -588,9 +848,9 @@ void push_addsub_binop::operator()(s3select* self, const char* a, const char* b)
   self->getAction()->exprQ.push_back(as);
 }
 
-void push_mulldiv_binop::operator()(s3select* self, const char* a, const char* b) const
+void push_mulldiv_binop::builder(s3select* self, [[maybe_unused]] const char* a, [[maybe_unused]] const char* b) const
 {
-  base_statement* vl = 0, *vr = 0;
+  base_statement* vl = nullptr, *vr = nullptr;
 
   vr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
@@ -602,7 +862,7 @@ void push_mulldiv_binop::operator()(s3select* self, const char* a, const char* b
   self->getAction()->exprQ.push_back(f);
 }
 
-void push_function_arg::operator()(s3select* self, const char* a, const char* b) const
+void push_function_arg::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
@@ -616,7 +876,7 @@ void push_function_arg::operator()(s3select* self, const char* a, const char* b)
   }
 }
 
-void push_function_name::operator()(s3select* self, const char* a, const char* b) const
+void push_function_name::builder(s3select* self, const char* a, const char* b) const
 {
   b--;
   while (*b == '(' || *b == ' ')
@@ -631,7 +891,7 @@ void push_function_name::operator()(s3select* self, const char* a, const char* b
   self->getAction()->funcQ.push_back(func);
 }
 
-void push_function_expr::operator()(s3select* self, const char* a, const char* b) const
+void push_function_expr::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
@@ -641,133 +901,165 @@ void push_function_expr::operator()(s3select* self, const char* a, const char* b
   self->getAction()->exprQ.push_back(func);
 }
 
-void push_compare_operator::operator()(s3select* self, const char* a, const char* b) const
+void push_compare_operator::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
   arithmetic_operand::cmp_t c = arithmetic_operand::cmp_t::NA;
 
-  if (token.compare("==") == 0)
+  if (token == "==")
   {
     c = arithmetic_operand::cmp_t::EQ;
   }
-  else if (token.compare("!=") == 0)
+  else if (token == "!=")
   {
     c = arithmetic_operand::cmp_t::NE;
   }
-  else if (token.compare(">=") == 0)
+  else if (token == ">=")
   {
     c = arithmetic_operand::cmp_t::GE;
   }
-  else if (token.compare("<=") == 0)
+  else if (token == "<=")
   {
     c = arithmetic_operand::cmp_t::LE;
   }
-  else if (token.compare(">") == 0)
+  else if (token == ">")
   {
     c = arithmetic_operand::cmp_t::GT;
   }
-  else if (token.compare("<") == 0)
+  else if (token == "<")
   {
     c = arithmetic_operand::cmp_t::LT;
-  }
-  else
-  {
-    c = arithmetic_operand::cmp_t::NA;
   }
 
   self->getAction()->arithmetic_compareQ.push_back(c);
 }
 
-void push_logical_operator::operator()(s3select* self, const char* a, const char* b) const
+void push_logical_operator::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
   logical_operand::oplog_t l = logical_operand::oplog_t::NA;
 
-  if (token.compare("and") == 0)
+  if (token == "and")
   {
     l = logical_operand::oplog_t::AND;
   }
-  else if (token.compare("or") == 0)
+  else if (token == "or")
   {
     l = logical_operand::oplog_t::OR;
-  }
-  else
-  {
-    l = logical_operand::oplog_t::NA;
   }
 
   self->getAction()->logical_compareQ.push_back(l);
 }
 
-void push_arithmetic_predicate::operator()(s3select* self, const char* a, const char* b) const
+void push_arithmetic_predicate::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
   base_statement* vr, *vl;
   arithmetic_operand::cmp_t c = self->getAction()->arithmetic_compareQ.back();
   self->getAction()->arithmetic_compareQ.pop_back();
-  vr = self->getAction()->exprQ.back();
-  self->getAction()->exprQ.pop_back();
-  vl = self->getAction()->exprQ.back();
-  self->getAction()->exprQ.pop_back();
 
+  if (!self->getAction()->exprQ.empty())
+  {
+    vr = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  }
+  else
+  {
+    throw base_s3select_exception(std::string("missing right operand for arithmetic-comparision expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  
+  if (!self->getAction()->exprQ.empty())
+  {
+    vl = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  }
+  else
+  {
+    throw base_s3select_exception(std::string("missing left operand for arithmetic-comparision expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  
   arithmetic_operand* t = S3SELECT_NEW(self, arithmetic_operand, vl, c, vr);
 
-  self->getAction()->condQ.push_back(t);
+  self->getAction()->exprQ.push_back(t);
 }
 
-void push_logical_predicate::operator()(s3select* self, const char* a, const char* b) const
+void push_logical_predicate::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
-  base_statement* tl = 0, *tr = 0;
+  base_statement* tl = nullptr, *tr = nullptr;
   logical_operand::oplog_t oplog = self->getAction()->logical_compareQ.back();
   self->getAction()->logical_compareQ.pop_back();
 
-  if (self->getAction()->condQ.empty() == false)
+  if (self->getAction()->exprQ.empty() == false)
   {
-    tr = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
+    tr = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  }  
+  else 
+  {//should reject by syntax parser
+    throw base_s3select_exception(std::string("missing right operand for logical expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
   }
-  if (self->getAction()->condQ.empty() == false)
+
+  if (self->getAction()->exprQ.empty() == false)
   {
-    tl = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
+    tl = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+  } 
+  else 
+  {//should reject by syntax parser
+    throw base_s3select_exception(std::string("missing left operand for logical expression"), base_s3select_exception::s3select_exp_en_t::FATAL);
   }
 
   logical_operand* f = S3SELECT_NEW(self, logical_operand, tl, oplog, tr);
 
-  self->getAction()->condQ.push_back(f);
+  self->getAction()->exprQ.push_back(f);
 }
 
-void push_negation::operator()(s3select* self, const char* a, const char* b) const
+void push_negation::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
-  base_statement* pred;
-  if (self->getAction()->condQ.empty() == false)
+  base_statement* pred = nullptr;
+
+  if (self->getAction()->exprQ.empty() == false)
   {
-    pred = self->getAction()->condQ.back();
-    self->getAction()->condQ.pop_back();
+    pred = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
   }
+  else
+  {
+    throw base_s3select_exception(std::string("failed to create AST for NOT operator"), base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  
   //upon NOT operator, the logical and arithmetical operators are "tagged" to negate result.
   if (dynamic_cast<logical_operand*>(pred))
   {
     logical_operand* f = S3SELECT_NEW(self, logical_operand, pred);
-    self->getAction()->condQ.push_back(f);
+    self->getAction()->exprQ.push_back(f);
+  }
+  else if (dynamic_cast<__function*>(pred) || dynamic_cast<negate_function_operation*>(pred) || dynamic_cast<variable*>(pred))
+  {
+    negate_function_operation* nf = S3SELECT_NEW(self, negate_function_operation, pred);
+    self->getAction()->exprQ.push_back(nf);
+  }
+  else if(dynamic_cast<arithmetic_operand*>(pred))
+  {
+    arithmetic_operand* f = S3SELECT_NEW(self, arithmetic_operand, pred);
+    self->getAction()->exprQ.push_back(f);
   }
   else
   {
-    arithmetic_operand* f = S3SELECT_NEW(self, arithmetic_operand, pred);
-    self->getAction()->condQ.push_back(f);
+    throw base_s3select_exception(std::string("failed to create AST for NOT operator"), base_s3select_exception::s3select_exp_en_t::FATAL);
   }
 }
 
-void push_column_pos::operator()(s3select* self, const char* a, const char* b) const
+void push_column_pos::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
   variable* v;
 
-  if (token.compare("*") == 0 || token.compare("* ") == 0) //TODO space should skip in boost::spirit
+  if (token == "*" || token == "* ") //TODO space should skip in boost::spirit
   {
     v = S3SELECT_NEW(self, variable, token, variable::var_t::STAR_OPERATION);
   }
@@ -779,7 +1071,7 @@ void push_column_pos::operator()(s3select* self, const char* a, const char* b) c
   self->getAction()->exprQ.push_back(v);
 }
 
-void push_projection::operator()(s3select* self, const char* a, const char* b) const
+void push_projection::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
 
@@ -787,7 +1079,7 @@ void push_projection::operator()(s3select* self, const char* a, const char* b) c
   self->getAction()->exprQ.pop_back();
 }
 
-void push_alias_projection::operator()(s3select* self, const char* a, const char* b) const
+void push_alias_projection::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
   //extract alias name
@@ -808,9 +1100,472 @@ void push_alias_projection::operator()(s3select* self, const char* a, const char
   self->getAction()->exprQ.pop_back();
 }
 
-void push_debug_1::operator()(s3select* self, const char* a, const char* b) const
+void push_between_filter::builder(s3select* self, const char* a, const char* b) const
 {
   std::string token(a, b);
+
+  std::string between_function("#between#");
+
+  __function* func = S3SELECT_NEW(self, __function, between_function.c_str(), self->getS3F());
+
+  base_statement* second_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(second_expr);
+
+  base_statement* first_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(first_expr);
+
+  base_statement* main_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(main_expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_in_predicate_first_arg::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  if(self->getAction()->exprQ.empty())
+  {
+    throw base_s3select_exception("failed to create AST for in predicate", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  self->getAction()->inPredicateQ.push_back( self->getAction()->exprQ.back() );
+  self->getAction()->exprQ.pop_back();
+
+  if(self->getAction()->exprQ.empty())
+  {
+    throw base_s3select_exception("failed to create AST for in predicate", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  self->getAction()->inMainArg = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+
+}
+
+void push_in_predicate_arguments::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  if(self->getAction()->exprQ.empty())
+  {
+    throw base_s3select_exception("failed to create AST for in predicate", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  self->getAction()->inPredicateQ.push_back( self->getAction()->exprQ.back() );
+
+  self->getAction()->exprQ.pop_back();
+
+}
+
+void push_in_predicate::builder(s3select* self, const char* a, const char* b) const
+{
+  // expr in (e1,e2,e3 ...)
+  std::string token(a, b);
+
+  std::string in_function("#in_predicate#");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  while(!self->getAction()->inPredicateQ.empty())
+  {
+    base_statement* ei = self->getAction()->inPredicateQ.back();
+
+    self->getAction()->inPredicateQ.pop_back();
+
+    func->push_argument(ei);
+
+  }
+
+  func->push_argument( self->getAction()->inMainArg );
+
+  self->getAction()->exprQ.push_back(func);
+
+  self->getAction()->inPredicateQ.clear();
+
+  self->getAction()->inMainArg = 0;
+}
+
+void push_like_predicate::builder(s3select* self, const char* a, const char* b) const
+{
+  // expr like expr ; both should be string, the second expression could be compiled at the
+  // time AST is build, which will improve performance much.
+
+  std::string token(a, b);
+  std::string in_function("#like_predicate#");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  if (!dynamic_cast<variable*>(expr))
+  {
+    throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+  else if( dynamic_cast<variable*>(expr)->m_var_type != variable::var_t::COL_VALUE)
+  {
+    throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
+  }
+
+  func->push_argument(expr);
+
+  base_statement* main_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(main_expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_is_null_predicate::builder(s3select* self, const char* a, const char* b) const
+{
+    //expression is null, is not null 
+  std::string token(a, b);
+  bool is_null = true;
+
+  for(int i=0;i<token.size();i++)
+  {//TODO use other scan rules
+    bsc::parse_info<> info = bsc::parse(token.c_str()+i, (bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null")) , bsc::space_p);
+    if (info.full)
+      is_null = false;
+  }
+
+  std::string in_function("#is_null#");
+
+  if (is_null == false)
+  {
+    in_function = "#is_not_null#";
+  }
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+
+  if (!self->getAction()->exprQ.empty())
+  {
+    base_statement* expr = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
+    func->push_argument(expr);
+  }
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_when_condition_then::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  __function* func = S3SELECT_NEW(self, __function, "#when-then#", self->getS3F());
+
+ base_statement* then_expr = self->getAction()->exprQ.back();
+ self->getAction()->exprQ.pop_back();
+
+ base_statement* when_expr = self->getAction()->exprQ.back();
+ self->getAction()->exprQ.pop_back();
+
+ func->push_argument(then_expr);
+ func->push_argument(when_expr);
+
+ self->getAction()->whenThenQ.push_back(func);
+
+ self->getAction()->when_then_count ++;
+}
+
+void push_case_when_else::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  base_statement* else_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  __function* func = S3SELECT_NEW(self, __function, "#case-when-else#", self->getS3F());
+
+  func->push_argument(else_expr);
+
+  while(self->getAction()->when_then_count)
+  {
+    base_statement* when_then_func = self->getAction()->whenThenQ.back();
+    self->getAction()->whenThenQ.pop_back();
+
+    func->push_argument(when_then_func);
+
+    self->getAction()->when_then_count--;
+  }
+
+// condQ is cleared explicitly, because of "leftover", due to double scanning upon accepting
+// the following rule '(' condition-expression ')' , i.e. (3*3 == 12)
+// Because of the double-scan (bug in spirit?defintion?), a sub-tree for the left side is created, twice.
+// thus, it causes wrong calculation.
+
+  self->getAction()->exprQ.clear();
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_case_value::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  base_statement* case_value = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  self->getAction()->caseValueQ.push_back(case_value);
+}
+
+void push_when_value_then::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  __function* func = S3SELECT_NEW(self, __function, "#when-value-then#", self->getS3F());
+
+ base_statement* then_expr = self->getAction()->exprQ.back();
+ self->getAction()->exprQ.pop_back();
+
+ base_statement* when_expr = self->getAction()->exprQ.back();
+ self->getAction()->exprQ.pop_back();
+
+ base_statement* case_expr = self->getAction()->caseValueQ.back();
+
+ func->push_argument(then_expr);
+ func->push_argument(when_expr);
+ func->push_argument(case_expr);
+
+ self->getAction()->whenThenQ.push_back(func);
+
+ self->getAction()->when_then_count ++;
+}
+
+void push_cast_expr::builder(s3select* self, const char* a, const char* b) const
+{
+  //cast(expression as int/float/string/timestamp) --> new function "int/float/string/timestamp" ( args = expression )
+  std::string token(a, b);
+  
+  std::string cast_function;
+
+  cast_function = self->getAction()->dataTypeQ.back();
+  self->getAction()->dataTypeQ.pop_back();
+
+  __function* func = S3SELECT_NEW(self, __function, cast_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_data_type::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  auto cast_operator = [&](const char *s){return strncmp(a,s,strlen(s))==0;};
+
+  if(cast_operator("int"))
+  {
+    self->getAction()->dataTypeQ.push_back("int");
+  }else if(cast_operator("float"))
+  {
+    self->getAction()->dataTypeQ.push_back("float");
+  }else if(cast_operator("string"))
+  {
+    self->getAction()->dataTypeQ.push_back("string");
+  }else if(cast_operator("timestamp"))
+  {
+    self->getAction()->dataTypeQ.push_back("to_timestamp");
+  }else if(cast_operator("bool"))
+  {
+    self->getAction()->dataTypeQ.push_back("to_bool");
+  }
+}
+
+void push_trim_whitespace_both::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  __function* func = S3SELECT_NEW(self, __function, "#trim#", self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}  
+
+void push_trim_expr_one_side_whitespace::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string trim_function;
+
+  trim_function = self->getAction()->trimTypeQ.back();
+  self->getAction()->trimTypeQ.pop_back(); 
+
+  __function* func = S3SELECT_NEW(self, __function, trim_function.c_str(), self->getS3F());
+
+  base_statement* inp_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(inp_expr);
+
+  self->getAction()->exprQ.push_back(func);
+} 
+
+void push_trim_expr_anychar_anyside::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string trim_function;
+
+  trim_function = self->getAction()->trimTypeQ.back();
+  self->getAction()->trimTypeQ.pop_back(); 
+
+  __function* func = S3SELECT_NEW(self, __function, trim_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(expr);
+
+  base_statement* inp_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(inp_expr);
+
+  self->getAction()->exprQ.push_back(func);
+} 
+
+void push_trim_type::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  auto trim_option = [&](const char *s){return strncmp(a,s,strlen(s))==0;};
+
+  if(trim_option("leading"))
+  {
+    self->getAction()->trimTypeQ.push_back("#leading#");
+  }else if(trim_option("trailing"))
+  {
+    self->getAction()->trimTypeQ.push_back("#trailing#");
+  }else 
+  {
+    self->getAction()->trimTypeQ.push_back("#trim#");
+  }
+} 
+
+void push_substr_from::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  __function* func = S3SELECT_NEW(self, __function, "substring", self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  base_statement* start_position = self->getAction()->exprQ.back();
+
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(start_position);
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}  
+
+void push_substr_from_for::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  __function* func = S3SELECT_NEW(self, __function, "substring", self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  base_statement* start_position = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  base_statement* end_position = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  func->push_argument(end_position);
+  func->push_argument(start_position);
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_datediff::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string date_op;
+
+  date_op = self->getAction()->datePartQ.back();
+  self->getAction()->datePartQ.pop_back();
+
+  std::string date_function =  "#datediff_" + date_op + "#";
+
+  __function* func = S3SELECT_NEW(self, __function, date_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  base_statement* start_position = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  func->push_argument(start_position);
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_dateadd::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string date_op;
+
+  date_op = self->getAction()->datePartQ.back();
+  self->getAction()->datePartQ.pop_back();
+
+  std::string date_function =  "#dateadd_" + date_op + "#";
+
+  __function* func = S3SELECT_NEW(self, __function, date_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  base_statement* start_position = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  func->push_argument(start_position);
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_extract::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  std::string date_op;
+
+  date_op = self->getAction()->datePartQ.back();
+  self->getAction()->datePartQ.pop_back();
+
+  std::string date_function =  "#extract_" + date_op + "#";
+
+  __function* func = S3SELECT_NEW(self, __function, date_function.c_str(), self->getS3F());
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_date_part::builder(s3select* self, const char* a, const char* b) const
+{
+  std::string token(a, b);
+
+  self->getAction()->datePartQ.push_back(token);
 }
 
 /////// handling different object types
@@ -822,15 +1577,14 @@ protected:
   std::string m_obj_name;
 
 public:
-  base_s3object(scratch_area* m) : m_sa(m), m_obj_name("") {}
+  explicit base_s3object(scratch_area* m) : m_sa(m){}
 
   void set(scratch_area* m)
   {
     m_sa = m;
-    m_obj_name = "";
   }
 
-  virtual ~base_s3object() {}
+  virtual ~base_s3object() = default;
 };
 
 
@@ -851,10 +1605,10 @@ public:
 
   } m_csv_defintion;
 
-  csv_object(s3select* s3_query) :
+  explicit csv_object(s3select* s3_query) :
     base_s3object(s3_query->get_scratch_area()),
     m_skip_last_line(false),
-    m_s3_select(0),
+    m_s3_select(nullptr),
     m_error_count(0),
     m_extract_csv_header_info(false),
     m_previous_line(false),
@@ -868,7 +1622,7 @@ public:
   csv_object(s3select* s3_query, struct csv_defintions csv) :
     base_s3object(s3_query->get_scratch_area()),
     m_skip_last_line(false),
-    m_s3_select(0),
+    m_s3_select(nullptr),
     m_error_count(0),
     m_extract_csv_header_info(false),
     m_previous_line(false),
@@ -881,9 +1635,9 @@ public:
   }
 
   csv_object():
-    base_s3object(0),
+    base_s3object(nullptr),
     m_skip_last_line(false),
-    m_s3_select(0),
+    m_s3_select(nullptr),
     m_error_count(0),
     m_extract_csv_header_info(false),
     m_previous_line(false),
@@ -899,7 +1653,6 @@ private:
   bool m_aggr_flow = false; //TODO once per query
   bool m_is_to_aggregate;
   bool m_skip_last_line;
-  size_t m_stream_length;
   std::string m_error_description;
   char* m_stream;
   char* m_end_stream;
@@ -957,7 +1710,7 @@ public:
       m_where_clause->traverse_and_apply(m_sa, m_s3_select->get_aliases());
     }
 
-    for (auto p : m_projections)
+    for (auto& p : m_projections)
     {
       p->traverse_and_apply(m_sa, m_s3_select->get_aliases());
     }
@@ -971,7 +1724,7 @@ public:
     return m_error_description;
   }
 
-  virtual ~csv_object() {}
+  virtual ~csv_object() = default;
 
 public:
 
@@ -990,9 +1743,10 @@ public:
         if (number_of_tokens < 0) //end of stream
         {
           if (m_is_to_aggregate)
-            for (auto i : m_projections)
+            for (auto& i : m_projections)
             {
               i->set_last_call();
+              i->set_skip_non_aggregate(false);//projection column is set to be runnable
               result.append( i->eval().to_string() );
               result.append(",");
             }
@@ -1007,19 +1761,19 @@ public:
         }
 
         m_sa->update(m_row_tokens, number_of_tokens);
-        for (auto a : *m_s3_select->get_aliases()->get())
+        for (auto& a : *m_s3_select->get_aliases()->get())
         {
           a.second->invalidate_cache_result();
         }
 
-        if (!m_where_clause || m_where_clause->eval().i64() == true)
+        if (!m_where_clause || m_where_clause->eval().is_true())
           for (auto i : m_projections)
           {
             i->eval();
           }
 
       }
-      while (1);
+      while (true);
     }
     else
     {
@@ -1034,15 +1788,15 @@ public:
         }
 
         m_sa->update(m_row_tokens, number_of_tokens);
-        for (auto a : *m_s3_select->get_aliases()->get())
+        for (auto& a : *m_s3_select->get_aliases()->get())
         {
           a.second->invalidate_cache_result();
         }
 
       }
-      while (m_where_clause && m_where_clause->eval().i64() == false);
+      while (m_where_clause && !m_where_clause->eval().is_true());
 
-      for (auto i : m_projections)
+      for (auto& i : m_projections)
       {
         result.append( i->eval().to_string() );
         result.append(",");
@@ -1081,13 +1835,37 @@ public:
     return 0;
   }
 
+
   int run_s3select_on_stream(std::string& result, const char* csv_stream, size_t stream_length, size_t obj_size)
+  {
+    int status=0;
+    try{
+        status = run_s3select_on_stream_internal(result,csv_stream,stream_length,obj_size);
+    }
+    catch(base_s3select_exception& e)
+    {
+        m_error_description = e.what();
+        m_error_count ++;
+        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100)//abort query execution
+        {
+          return -1;
+        }
+    }
+    catch(chunkalloc_out_of_mem)
+    {
+      m_error_description = "out of memory";
+      return -1;
+    }
+
+    return status;
+  }
+
+private:
+  int run_s3select_on_stream_internal(std::string& result, const char* csv_stream, size_t stream_length, size_t obj_size)
   {
     //purpose: the cv data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
     //for later, upon next chunk of data is streaming, the stored-line is merge with current broken-line, and processed.
-    int status;
     std::string tmp_buff;
-    u_int32_t skip_last_bytes = 0;
     m_processed_bytes += stream_length;
 
     m_skip_first_line = false;
@@ -1106,7 +1884,7 @@ public:
       m_previous_line = false;
       m_skip_first_line = true;
 
-      status = run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
+      run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
     }
 
     if (csv_stream[stream_length - 1] != m_csv_defintion.row_delimiter)
@@ -1118,18 +1896,18 @@ public:
         p_obj_chunk--;  //scan until end-of previous line in chunk
       }
 
-      skip_last_bytes = (&(csv_stream[stream_length - 1]) - p_obj_chunk);
+      u_int32_t skip_last_bytes = (&(csv_stream[stream_length - 1]) - p_obj_chunk);
       m_last_line.assign(p_obj_chunk + 1, p_obj_chunk + 1 + skip_last_bytes); //save it for next chunk
 
       m_previous_line = true;//it means to skip last line
 
     }
 
-    status = run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
+    return run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
 
-    return status;
   }
 
+public:
   int run_s3select_on_object(std::string& result, const char* csv_stream, size_t stream_length, bool skip_first_line, bool skip_last_line, bool do_aggregate)
   {
 
@@ -1138,8 +1916,6 @@ public:
     m_end_stream = (char*)csv_stream + stream_length;
     m_is_to_aggregate = do_aggregate;
     m_skip_last_line = skip_last_line;
-
-    m_stream_length = stream_length;
 
     if(m_extract_csv_header_info == false)
     {
@@ -1168,7 +1944,7 @@ public:
         std::cout << e.what() << std::endl;
         m_error_description = e.what();
         m_error_count ++;
-        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100)//abort query execution
+        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100 || (m_stream>=m_end_stream))//abort query execution
         {
           return -1;
         }
@@ -1180,7 +1956,7 @@ public:
       }
 
     }
-    while (1);
+    while (true);
 
     return 0;
   }
