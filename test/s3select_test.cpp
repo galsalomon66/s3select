@@ -3444,6 +3444,14 @@ TEST(TestS3selectFunctions, floatcast)
   test_single_column_single_row("select cast('999e+999' as float) from s3object;","#failure#","converted value would fall out of the range of the result type!");
 }
 
+TEST(TestS3selectFunctions, intcast)
+{
+  test_single_column_single_row("select cast('1234a' as int) from s3object;","#failure#","extra characters after the number");
+  test_single_column_single_row("select cast('a1234' as int) from s3object;","#failure#","text cannot be converted to a number");
+  test_single_column_single_row("select cast('9223372036854775808' as int) from s3object;","#failure#","converted value would fall out of the range of the result type!");
+  test_single_column_single_row("select cast('-9223372036854775809' as int) from s3object;","#failure#","converted value would fall out of the range of the result type!");
+}
+
 TEST(TestS3selectFunctions, predicate_as_projection_column)
 {
   std::string input;

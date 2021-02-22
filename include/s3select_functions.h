@@ -556,42 +556,44 @@ struct _fn_max : public base_function
 
 struct _fn_to_int : public base_function
 {
-
   value var_result;
-  value func_arg;
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    char* perr;
-    int64_t i=0;
-    func_arg = (*args->begin())->eval();
+    value v = (*args->begin())->eval();
 
-    if (func_arg.type == value::value_En_t::STRING)
+    switch (v.type) {
+
+    case value::value_En_t::STRING:
     {
+      char* pend;
       errno = 0;
-      i = strtol(func_arg.str(), &perr, 10) ;  //TODO check error before constructor
-      if ((errno == ERANGE && (i == LONG_MAX || i == LONG_MIN)) || (errno != 0 && i == 0)) {
+      int64_t i= strtol(v.str(), &pend, 10);
+      if (errno == ERANGE) {
         throw base_s3select_exception("converted value would fall out of the range of the result type!");
-        return false;   
+      }
+      if (pend == v.str()) {
+        // no number found
+        throw base_s3select_exception("text cannot be converted to a number");
+      }
+      if (*pend) {
+        throw base_s3select_exception("extra characters after the number");
+      }
+
+      var_result = i;
     }
-    
-    if (*perr != '\0') {
-      throw base_s3select_exception("characters after int!");
-      return false;
-    }
-  } 
-    else if (func_arg.type == value::value_En_t::FLOAT)
-    {
-      i = func_arg.dbl();
-    }
-    else
-    {
-      i = func_arg.i64();
+    break;
+
+    case value::value_En_t::FLOAT:
+      var_result = static_cast<int64_t>(v.dbl());
+      break;
+
+    default:
+      var_result = v.i64();
+      break;
     }
 
-    var_result =  i ;
-    *result =  var_result;
-
+    *result = var_result;
     return true;
   }
 
