@@ -1226,7 +1226,7 @@ void push_is_null_predicate::builder(s3select* self, const char* a, const char* 
   std::string token(a, b);
   bool is_null = true;
 
-  for(int i=0;i<token.size();i++)
+  for(size_t i=0;i<token.size();i++)
   {//TODO use other scan rules
     bsc::parse_info<> info = bsc::parse(token.c_str()+i, (bsc::str_p("is") >> bsc::str_p("not") >> bsc::str_p("null")) , bsc::space_p);
     if (info.full)
