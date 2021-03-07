@@ -20,7 +20,7 @@ The where-clause is boolean expression made of arithmetic expression building bl
 
 Projection is a list of arithmetic expressions
 
-I created a container (**sudo docker run -it galsl/s3select:dev /bin/bash/**) built with boost libraries , for building and running the s3select demo application.
+I created a container (**sudo docker run -it galsl/s3select:dev /bin/bash**) built with boost libraries , for building and running the s3select demo application.
 
 **The application can run on CSV files only,there is a zipped demo-input-file /s3select/datetime_decimal_float_100k.csv.gz as follow.**
 
