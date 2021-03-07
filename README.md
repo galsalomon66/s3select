@@ -20,18 +20,19 @@ The where-clause is boolean expression made of arithmetic expression building bl
 
 Projection is a list of arithmetic expressions
 
-I created a container (**sudo docker run -it galsl/boost:latest /bin/bash/**) built with boost libraries , for building and running the s3select demo application.
+I created a container (**sudo docker run -it galsl/s3select:dev /bin/bash/**) built with boost libraries , for building and running the s3select demo application.
 
-**The demo can run on CSV files only, as follow. (folder s3select_demo)**
-* bash> s3select -q ‘select _1 +_2,_5 * 3 from /...some..full-path/csv.txt where _1 > _2;’
+**The application can run on CSV files only,there is a zipped demo-input-file /s3select/datetime_decimal_float_100k.csv.gz as follow.**
 
-* bash> cat /...some..full-path/csv.txt | s3select -q ‘select _1,_5 from stdin where _1 > _2;’
+* bash> /s3select/s3select/example/s3select_example -q ‘select _1 +_2,_5 * 3 from /...some..full-path/csv.txt where _1 > _2;’
 
-* bash> cat /...some..full-path/csv.txt | s3select -q ‘select c1,c5 from stdin where c1 > c2;’ -s ‘c1,c2,c3,c4,c5’
+* bash> zcat /s3select/datetime_decimal_float_100k.csv.gz | /s3select/s3select/example/s3select_example -q 'select count(*) from stdin;'
 
-* bash> cat /...some..full-path/csv.txt | s3select -q 'select min(int(substr(_1,1,1))) from  stdin where  substr(_1,1,1) ==  substr(_2,1,1);'
+* bash> zcat /s3select/datetime_decimal_float_100k.csv.gz | head -100 | /s3select/s3select/example/s3select_example -q 'select count(*),sum(int(_2)),sum(float(_3)) from stdin;'
+ 
+* bash> zcat /s3select/datetime_decimal_float_100k.csv.gz | /s3select/s3select/example/s3select_example -q 'select count(*) from stdin where int(_2) between 45000 and 50000;'
 
--s flag is defining a schema (no type only names) , without schema each column can be accessed with _N (_1 is the first column).
+* bash> zcat /s3select/datetime_decimal_float_100k.csv.gz | /s3select/s3select/example/s3select_example -q 'select count(*) from stdin  where extract(year from to_timestamp(_1)) == 1933;'
 
 -q flag is for the query.
 
