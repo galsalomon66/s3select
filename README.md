@@ -24,7 +24,7 @@ I created a container (**sudo docker run -it galsl/s3select:dev /bin/bash/**) bu
 
 **The application can run on CSV files only,there is a zipped demo-input-file /s3select/datetime_decimal_float_100k.csv.gz as follow.**
 
-* bash> /s3select/s3select/example/s3select_example -q ‘select _1 +_2,_5 * 3 from /...some..full-path/csv.txt where _1 > _2;’
+* bash> /s3select/s3select/example/s3select_example -q ‘select _1 +_2,int(_5) * 3 from /...some..full-path/csv.txt where _1 > _2;’
 
 * bash> zcat /s3select/datetime_decimal_float_100k.csv.gz | /s3select/s3select/example/s3select_example -q 'select count(*) from stdin;'
 
