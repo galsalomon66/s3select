@@ -34,6 +34,8 @@ I created a container (**sudo docker run -it galsl/s3select:dev /bin/bash**) bui
 
 * bash> zcat /s3select/datetime_decimal_float_100k.csv.gz | /s3select/s3select/example/s3select_example -q 'select count(*) from stdin  where extract(year from to_timestamp(_1)) == 1933;'
 
+* bash> /s3select/s3select/example/generate_rand_csv 1000000 10 | /s3select/s3select/example/s3select_example -q 'select sum(int(_1))/count(*) from stdin where int(_2) between 450 and 500;'
+
 -q flag is for the query.
 
 the engine supporting the following arithmetical operations +,-,*,/,^ , ( ) , and also the logical operators and,or.
