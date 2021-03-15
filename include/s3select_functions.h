@@ -7,6 +7,7 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <regex>
 #include <boost/regex.hpp>
+#include <algorithm>
 
 using namespace std::string_literals;
 
@@ -1230,79 +1231,281 @@ struct _fn_in : public base_function
 
 struct _fn_like : public base_function
 {
-
   value res;
   std::regex compiled_regex;
+  bool constant_state;
+  value like_expr_val;
+  value escape_expr_val;
 
-  explicit _fn_like(value s)
-  {
-    std::string string_value = s.to_string();
-    transform(string_value);
-    compiled_regex = std::regex(string_value);
-  } 
 
-  void transform(std::string& s)
+  explicit _fn_like(base_statement* esc, base_statement* like_expr)
   {
-    std::string::size_type i = 0;
-    while (!s.empty())
-    {
-        i = s.find("%%", i);
-        if (i == std::string::npos) break;
-        s.erase(i, 1);      
-    }
-    bool startswith = (s[0] == '%' && s[s.size()-1] != '%');
-    bool endswith = (s[0] != '%' && s[s.size()-1] == '%');
-    bool startend = (s[0] == '%' && s[s.size()-1] == '%');
-    if (startswith) {
-      std::replace(s.begin(), s.begin()+1, '%', '^');
-      s.insert(1, ".");
-      s.insert(2, "*");
-      s.append("$");
-      std::replace(s.begin(), s.end(), '_', '.');
-    } else if (endswith) {
-      s.insert(0, "^");
-      std::replace(s.end()-1, s.end(), '%', '$');
-      s.insert(s.size()-1,".");
-      s.insert(s.size()-1,"*");
-      std::replace(s.begin(), s.end(), '_', '.');
-    } else if (startend) {
-      std::replace(s.begin(), s.begin()+1, '%', '^');
-      s.insert(1, ".");
-      s.insert(2, "*");
-      std::replace(s.end()-1, s.end(), '%', '$');
-      s.insert(s.size()-1,".");
-      s.insert(s.size()-1,"*");
-      std::replace(s.begin(), s.end(), '_', '.');
-    } else {
-      std::string findThis = "%";
-      std::string replaceWith = ".*";
-      s.insert(0,"^");
-      s.append("$");
-      std::size_t pos = 0;
-      while ((pos = s.find(findThis, pos)) != std::string::npos)
-      {
-        s.replace(pos, findThis.length(), replaceWith);
-        pos += replaceWith.length();
+    constant_state = false;
+
+    auto is_constant = [&](base_statement* bs) {
+      if (dynamic_cast<variable*>(bs) && dynamic_cast<variable*>(bs)->m_var_type == variable::var_t::COL_VALUE) {
+        return true;
+      } else {
+        return false;
       }
-      std::replace(s.begin(), s.end(), '_', '.');
+    };
+
+    if (is_constant(esc) && is_constant(like_expr)) {
+      constant_state = true;
     }
+
+    if(constant_state == true)
+    {
+      escape_expr_val = esc->eval();
+      like_expr_val = like_expr->eval();
+
+      if (like_expr_val.type != value::value_En_t::STRING)  {
+        throw base_s3select_exception("like expression must be string");
+      }
+
+      if (escape_expr_val.type != value::value_En_t::STRING)  {
+        throw base_s3select_exception("escape expression must be string");
+      }
+
+      std::vector<char> like_as_regex = transform(like_expr_val.str(), *escape_expr_val.str());
+      std::string like_as_regex_str(like_as_regex.begin(), like_as_regex.end());
+      compiled_regex = std::regex(like_as_regex_str);
+    }
+
   }
+
+  std::vector<char> transform(const char* s, char escape)
+  {   
+  enum  state_expr_t {START , ESCAPE, START_STAR_CHAR , START_METACHAR, START_ANYCHAR , METACHAR, STAR_CHAR, ANYCHAR, END };
+  state_expr_t st{START};
+
+  const char *p = s;
+  size_t size = strlen(s);
+  size_t i = 0;
+  std::vector<char> v;
   
-  bool operator()(bs_stmt_vec_t* args, variable* result) override
+  while(*p)
+  {
+    switch (st)
+    {
+      case START:
+          if(*p == escape) {
+          st = ESCAPE;
+          v.push_back('^');
+          } else if(*p == '%') {
+        v.push_back('^');
+            v.push_back('.');
+            v.push_back('*');
+            st = START_STAR_CHAR;
+            } else if(*p == '_') {
+        v.push_back('^');
+        v.push_back('.');
+        st=START_METACHAR;
+          } else {
+        v.push_back('^');
+        v.push_back(*p);
+        st=START_ANYCHAR;
+          } break;
+
+      case START_STAR_CHAR:
+          if(*p == escape) {
+          st = ESCAPE;
+          } else if(*p == '%') {
+        st = START_STAR_CHAR;
+        } else if(*p == '_') {
+        v.push_back('.');
+        st = METACHAR;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case START_METACHAR:
+          if(*p == escape) {
+          st = ESCAPE;
+          } else if(*p == '_') {
+        v.push_back('.');
+        st = METACHAR;
+        } else if(*p == '%') {
+        v.push_back('.');
+        v.push_back('*');
+        st = STAR_CHAR;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case START_ANYCHAR:
+          if(*p == escape) {
+          st = ESCAPE;
+          } else if(*p == '_' && i == size-1) {
+        v.push_back('.');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '_') {
+        v.push_back('.');
+        st = METACHAR;
+        } else if(*p == '%' && i == size-1) {
+        v.push_back('.');
+        v.push_back('*');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '%') {
+        v.push_back('.');
+        v.push_back('*');
+        st = STAR_CHAR;
+        } else  if(i == size-1) {
+        v.push_back(*p);
+        v.push_back('$');
+        st = END;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case METACHAR:
+          if(*p == escape) {
+          st = ESCAPE;
+          } else if(*p == '_' && i == size-1) {
+        v.push_back('.');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '_') {
+        v.push_back('.');
+        st = METACHAR;
+        } else if(*p == '%' && i == size-1) {
+        v.push_back('.');
+        v.push_back('*');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '%') {
+        v.push_back('.');
+        v.push_back('*');
+        st = STAR_CHAR;
+        } else if(i == size-1) {
+        v.push_back(*p);
+        v.push_back('$');
+        st = END;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case ANYCHAR:
+          if(*p == escape) {
+          st = ESCAPE;
+          } else if(*p == '_' && i == size-1) {
+        v.push_back('.');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '_') {
+        v.push_back('.');
+        st = METACHAR;
+        } else if(*p == '%' && i == size-1) {
+        v.push_back('.');
+        v.push_back('*');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '%') {
+        v.push_back('.');
+        v.push_back('*');
+        st = STAR_CHAR;
+        } else  if(i == size-1) {
+        v.push_back(*p);
+        v.push_back('$');
+        st = END;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case STAR_CHAR:
+          if(*p == escape) {
+          st = ESCAPE;
+          } else if(*p == '%' && i == size-1) {
+        v.push_back('$');
+        st = END;
+        } else if(*p == '%') {
+        st = STAR_CHAR;
+        } else if(*p == '_' && i == size-1) {
+        v.push_back('.');
+        v.push_back('$');
+        st = END;
+        } else if(*p == '_') {
+        v.push_back('.');
+        st = METACHAR;
+        } else  if(i == size-1) {
+        v.push_back(*p);
+        v.push_back('$');
+        st = END;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case ESCAPE:
+        if(i == size-1) {
+        v.push_back(*p);
+        v.push_back('$');
+        st = END;
+        } else {
+        v.push_back(*p);
+        st = ANYCHAR;
+        } break;
+
+      case END:
+        return v;
+
+      default:
+        throw base_s3select_exception("missing state!");
+        break;
+    }
+    p++;
+    i++;
+  }
+  return v;
+}
+
+bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     auto iter = args->begin();
+
+    base_statement* escape_expr = *iter;
+    iter++;
+    base_statement* like_expr = *iter;
     iter++;
     base_statement* main_expr = *iter;
+
+    if (constant_state == false){
+      like_expr_val = like_expr->eval();
+      escape_expr_val = escape_expr->eval();
+
+      if (like_expr_val.type != value::value_En_t::STRING)  {
+        throw base_s3select_exception("like expression must be string");
+      }
+
+      if (escape_expr_val.type != value::value_En_t::STRING)  {
+        throw base_s3select_exception("esacpe expression must be string");
+      }
+
+      std::vector<char> like_as_regex = transform(like_expr_val.str(), *escape_expr_val.str());
+      std::string like_as_regex_str(like_as_regex.begin(), like_as_regex.end());
+      compiled_regex = std::regex(like_as_regex_str);
+    }
+
     value main_expr_val = main_expr->eval();
+    if (main_expr_val.type != value::value_En_t::STRING)  {
+        throw base_s3select_exception("main expression must be string");
+    }
+         
     if ( std::regex_match(main_expr_val.to_string(), compiled_regex)) {
       result->set_value(true);
     } else {
       result->set_value(false);
-    }
+    } 
     return true;
-  }
+    }
 };
-
 
 struct _fn_substr : public base_function
 {
@@ -1975,9 +2178,10 @@ base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt
     return S3SELECT_NEW(this,_fn_nullif);
     break;
 
-  case s3select_func_En_t::LIKE:  
-    return S3SELECT_NEW(this,_fn_like, arguments[0]->eval());
+  case s3select_func_En_t::LIKE:
+    return S3SELECT_NEW(this,_fn_like,arguments[0],arguments[1]);
     break;
+
   case s3select_func_En_t::COALESCE:
     return S3SELECT_NEW(this,_fn_coalesce);
     break;

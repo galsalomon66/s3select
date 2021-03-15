@@ -274,11 +274,17 @@ struct push_in_predicate_first_arg : public base_ast_builder
 };
 static push_in_predicate_first_arg g_push_in_predicate_first_arg;
 
-struct push_like_predicate : public base_ast_builder
+struct push_like_predicate_escape : public base_ast_builder
 {
   void builder(s3select* self, const char* a, const char* b) const;
 };
-static push_like_predicate g_push_like_predicate;
+static push_like_predicate_escape g_push_like_predicate_escape;
+
+struct push_like_predicate_no_escape : public base_ast_builder
+{
+  void builder(s3select* self, const char* a, const char* b) const;
+};
+static push_like_predicate_no_escape g_push_like_predicate_no_escape;
 
 struct push_is_null_predicate : public base_ast_builder
 {
@@ -609,7 +615,7 @@ public:
 
       cmp_operand = special_predicates | (factor) >> *(arith_cmp[BOOST_BIND_ACTION(push_compare_operator)] >> (factor)[BOOST_BIND_ACTION(push_arithmetic_predicate)]);
 
-      special_predicates = (is_null) | (is_not_null) | (between_predicate) | (in_predicate) | (like_predicate) ;
+      special_predicates = (is_null) | (is_not_null) | (between_predicate) | (in_predicate) | (like_predicate);
 
       is_null = ((factor) >> bsc::str_p("is") >> bsc::str_p("null"))[BOOST_BIND_ACTION(push_is_null_predicate)];
 
@@ -618,8 +624,12 @@ public:
       between_predicate = (arithmetic_expression >> bsc::str_p("between") >> arithmetic_expression >> bsc::str_p("and") >> arithmetic_expression)[BOOST_BIND_ACTION(push_between_filter)];
 
       in_predicate = (arithmetic_expression >> bsc::str_p("in") >> '(' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_first_arg)] >> *(',' >> arithmetic_expression[BOOST_BIND_ACTION(push_in_predicate_arguments)]) >> ')')[BOOST_BIND_ACTION(push_in_predicate)];
+      
+      like_predicate = (like_predicate_escape) |(like_predicate_no_escape);
 
-      like_predicate = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate)];
+      like_predicate_no_escape = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate_no_escape)];
+
+      like_predicate_escape = (arithmetic_expression >> bsc::str_p("like") >> arithmetic_expression >> bsc::str_p("escape") >> arithmetic_expression)[BOOST_BIND_ACTION(push_like_predicate_escape)];
 
       factor = arithmetic_expression  | ( '(' >> arithmetic_predicate >> ')' ) ; 
 
@@ -700,7 +710,7 @@ public:
     bsc::rule<ScannerT> cmp_operand, arith_cmp, condition_expression, arithmetic_predicate, logical_predicate, factor; 
     bsc::rule<ScannerT> trim, trim_whitespace_both, trim_one_side_whitespace, trim_anychar_anyside, trim_type, trim_remove_type, substr, substr_from, substr_from_for;
     bsc::rule<ScannerT> datediff, dateadd, extract, date_part, date_part_extract, time_to_string_constant, time_to_string_dynamic;
-    bsc::rule<ScannerT> special_predicates, between_predicate, in_predicate, like_predicate, is_null, is_not_null;
+    bsc::rule<ScannerT> special_predicates, between_predicate, in_predicate, like_predicate, like_predicate_escape, like_predicate_no_escape, is_null, is_not_null;
     bsc::rule<ScannerT> muldiv_operator, addsubop_operator, function, arithmetic_expression, addsub_operand, list_of_function_arguments, arithmetic_argument, mulldiv_operand;
     bsc::rule<ScannerT> fs_type, object_path;
     bsc::rule<ScannerT> projections, projection_expression, alias_name, column_pos;
@@ -1205,11 +1215,31 @@ void push_in_predicate::builder(s3select* self, const char* a, const char* b) co
   self->getAction()->inMainArg = 0;
 }
 
-void push_like_predicate::builder(s3select* self, const char* a, const char* b) const
+void push_like_predicate_no_escape::builder(s3select* self, const char* a, const char* b) const
 {
-  // expr like expr ; both should be string, the second expression could be compiled at the
-  // time AST is build, which will improve performance much.
 
+  std::string token(a, b);
+  std::string in_function("#like_predicate#");
+
+  __function* func = S3SELECT_NEW(self, __function, in_function.c_str(), self->getS3F());
+  
+  variable* v = S3SELECT_NEW(self, variable, "\\",variable::var_t::COL_VALUE);
+  func->push_argument(v);
+  
+  base_statement* like_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(like_expr);  
+
+  base_statement* expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  func->push_argument(expr);
+
+  self->getAction()->exprQ.push_back(func);
+}
+
+void push_like_predicate_escape::builder(s3select* self, const char* a, const char* b) const
+{
   std::string token(a, b);
   std::string in_function("#like_predicate#");
 
@@ -1218,20 +1248,15 @@ void push_like_predicate::builder(s3select* self, const char* a, const char* b) 
   base_statement* expr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
 
-  if (!dynamic_cast<variable*>(expr))
-  {
-    throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
-  }
-  else if( dynamic_cast<variable*>(expr)->m_var_type != variable::var_t::COL_VALUE)
-  {
-    throw base_s3select_exception("like expression must be a constant string", base_s3select_exception::s3select_exp_en_t::FATAL);
-  }
-
   func->push_argument(expr);
 
   base_statement* main_expr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
   func->push_argument(main_expr);
+
+  base_statement* escape_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+  func->push_argument(escape_expr);
 
   self->getAction()->exprQ.push_back(func);
 }

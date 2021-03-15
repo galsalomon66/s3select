@@ -515,6 +515,15 @@ void generate_csv(std::string& out, size_t size) {
   out = ss.str();
 }
 
+void generate_csv_escape(std::string& out, size_t size) {
+  // schema is: int, float, string, string
+  std::stringstream ss;
+  for (auto i = 0U; i < size; ++i) {
+    ss << "_ar" << "," << "aeio_" << "," << "foo"+std::to_string(i) << "," << std::to_string(i)+"bar" << std::endl;
+  }
+  out = ss.str();
+}
+
 void generate_rand_columns_csv(std::string& out, size_t size) {
   std::stringstream ss;
   auto r = [](){return rand()%1000;};
@@ -2215,6 +2224,11 @@ TEST(TestS3selectFunctions, likeop5false)
 test_single_column_single_row( "select \"true\" from stdin where not  \"abcde\" like \"[d-f]bcde\";" ,"true,\n");
 }
 
+TEST(TestS3selectFunctions, likeopdynamic)
+{
+test_single_column_single_row( "select \"true\" from stdin where \"abcde\" like substring(\"abcdefg\",1,5);" ,"true,\n");
+}
+
 TEST(TestS3selectFunctions, likeop5not)
 {
 test_single_column_single_row( "select \"true\" from stdin where \"abcde\" like \"[^d-f]bcde\";" ,"true,\n");
@@ -2480,3 +2494,54 @@ TEST(TestS3selectFunctions, trim11)
 test_single_column_single_row( "select trim(trailing from trim(leading from \"   foobar   \")) from stdin ;" ,"foobar,\n");
 }
 
+TEST(TestS3selectFunctions, likescape)
+{
+  test_single_column_single_row("select \"true\" from stdin where  \"abc_defgh\" like \"abc$_defgh\" escape \"$\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"j_kerhai\" like \"j#_%\" escape \"#\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"jok_ai\" like \"%#_ai\" escape \"#\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"jo_aibc\" like \"%#_ai%\" escape \"#\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"jok%abc\" like \"jok$%abc\" escape \"$\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"ab%%a\" like \"ab$%%a\" escape \"$\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"_a_\" like \"=_a=_\" escape \"=\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"abc#efgh\" like \"abc##efgh\" escape \"#\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"%abs%\" like \"#%abs#%\" escape \"#\";","true,\n");
+  test_single_column_single_row("select \"true\" from s3object where  \"abc##efgh\" like \"abc####efgh\" escape \"#\";","true,\n");
+}
+
+TEST(TestS3selectFunctions, likescapedynamic)
+{
+test_single_column_single_row( "select \"true\" from s3object where  \"abc#efgh\" like substring(\"abc##efghi\",1,9) escape \"#\";" ,"true,\n");
+test_single_column_single_row( "select \"true\" from s3object where  \"abcdefgh\" like substring(\"abcd%abc\",1,5);" ,"true,\n");
+test_single_column_single_row( "select \"true\" from s3object where  substring(\"abcde\",1,5) like \"abcd_\" ;" ,"true,\n");
+test_single_column_single_row( "select \"true\" from s3object where  substring(\"abcde\",1,5) like substring(\"abcd_ab\",1,5) ;" ,"true,\n");
+}
+
+TEST(TestS3selectFunctions, test_escape_expressions)
+{
+  std::string input, input1;
+  size_t size = 10000;
+  generate_csv_escape(input, size);
+  const std::string input_query_1 = "select count(*) from stdin where _1 like \"%_ar\" escape \"%\";";
+
+  std::string s3select_result_1 = run_s3select(input_query_1,input);
+
+  ASSERT_NE(s3select_result_1,failure_sign);
+
+  const std::string input_query_2 = "select count(*) from stdin where substring(_1,char_length(_1),1) == \"r\" and substring(_1,char_length(_1)-1,1) == \"a\" and substring(_1,char_length(_1)-2,1) == \"_\";";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2);
+
+  const std::string input_query_3 = "select count(*) from stdin where _2 like \"%aeio$_\" escape \"$\";";
+
+  std::string s3select_result_3 = run_s3select(input_query_3,input);
+
+  ASSERT_NE(s3select_result_3,failure_sign);
+
+  const std::string input_query_4 = "select count(*) from stdin where substring(_2,1,5) == \"aeio_\";";
+
+  std::string s3select_result_4 = run_s3select(input_query_4,input);
+
+  ASSERT_EQ(s3select_result_3, s3select_result_4);
+}
