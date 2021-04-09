@@ -15,6 +15,16 @@ using namespace std::string_literals;
 namespace s3selectEngine
 {
 
+struct push_char
+{
+  void operator()(const char* a, const char* b, uint32_t* n) const
+  {
+    *n = *a;
+  }
+
+};
+static push_char g_push_char;
+
 struct push_1dig
 {
   void operator()(const char* a, const char* b, uint32_t* n) const
@@ -95,6 +105,8 @@ enum class s3select_func_En_t {ADD,
                                EXTRACT_MINUTE,
                                EXTRACT_SECOND,
                                EXTRACT_WEEK,
+                               EXTRACT_TIMEZONE_HOUR,
+                               EXTRACT_TIMEZONE_MINUTE,
                                DATE_ADD_YEAR,
                                DATE_ADD_MONTH,
                                DATE_ADD_DAY,
@@ -160,6 +172,8 @@ private:
     {"#extract_minute#", s3select_func_En_t::EXTRACT_MINUTE},
     {"#extract_second#", s3select_func_En_t::EXTRACT_SECOND},
     {"#extract_week#", s3select_func_En_t::EXTRACT_WEEK},
+    {"#extract_timezone_hour#", s3select_func_En_t::EXTRACT_TIMEZONE_HOUR},
+    {"#extract_timezone_minute#", s3select_func_En_t::EXTRACT_TIMEZONE_MINUTE},
     {"#dateadd_year#", s3select_func_En_t::DATE_ADD_YEAR},
     {"#dateadd_month#", s3select_func_En_t::DATE_ADD_MONTH},
     {"#dateadd_day#", s3select_func_En_t::DATE_ADD_DAY},
@@ -671,9 +685,9 @@ struct _fn_to_timestamp : public base_function
                                 >> (dig2[BOOST_BIND_ACTION_PARAM(push_2dig, &mo)]) >> *(date_separator)
                                 >> (dig2[BOOST_BIND_ACTION_PARAM(push_2dig, &dy)]) >> *(delimiter));
 
-  uint32_t hr = 0, mn = 0, sc = 0, frac_sec = 0, tz_hr = 0, tz_mn = 0;
-  bsc::rule<> d_timezone_dig =  (*(timezone_sign) >> (dig2[BOOST_BIND_ACTION_PARAM(push_2dig, &tz_hr)]) >> *(time_separator)
-                                >> (dig2[BOOST_BIND_ACTION_PARAM(push_2dig, &tz_mn)])) | zero_timezone;
+  uint32_t hr = 0, mn = 0, sc = 0, frac_sec = 0, tz_hr = 0, tz_mn = 0, sign, tm_zone;
+  bsc::rule<> d_timezone_dig =  ((timezone_sign[BOOST_BIND_ACTION_PARAM(push_char, &sign)]) >> (dig2[BOOST_BIND_ACTION_PARAM(push_2dig, &tz_hr)]) >> *(time_separator)
+                                >> (dig2[BOOST_BIND_ACTION_PARAM(push_2dig, &tz_mn)])) | (zero_timezone[BOOST_BIND_ACTION_PARAM(push_char, &tm_zone)]);
 
   bsc::rule<> fraction_sec = (dig6[BOOST_BIND_ACTION_PARAM(push_6dig, &frac_sec)]) |
                              (dig5[BOOST_BIND_ACTION_PARAM(push_5dig, &frac_sec)]) |
@@ -694,15 +708,17 @@ struct _fn_to_timestamp : public base_function
 
   bsc::rule<> d_date_time = ((d_yyyymmdd_dig) >> (d_time_dig)) | (d_yyyymmdd_dig) | (d_yyyy_dig);
 
-  boost::posix_time::ptime new_ptime;
-
+  timestamp_t tmstmp;
   value v_str;
-
+  int tz_hour;
 
   bool datetime_validation()
   {
-    if (yr >= 1400 && yr <= 9999 && mo >= 1 && mo <= 12 && dy >= 1 && hr < 24 && mn < 60 && sc < 60 && tz_hr < 24 && tz_mn < 60)
+    if (yr >= 1400 && yr <= 9999 && mo >= 1 && mo <= 12 && dy >= 1 && hr < 24 && mn < 60 && sc < 60 && tz_hour <= 14 && tz_hour >= -12  && tz_mn < 60)
     {
+      if ( (tz_hour == -12 || tz_hour == 14) && tz_mn > 0)
+        return false;
+
       switch (mo)
       {
         case 1:
@@ -788,20 +804,25 @@ struct _fn_to_timestamp : public base_function
 
     bsc::parse_info<> info_dig = bsc::parse(v_str.str(), d_date_time);
 
+    tz_hour = tz_hr;
+    if ((char)sign == '-')
+    {
+      tz_hour *= -1;
+    }
+
     if(datetime_validation()==false or !info_dig.full)
     {
       throw base_s3select_exception("input date-time is illegal");
     }
 
+    boost::posix_time::ptime new_ptime;
+
     #if NANO_SEC
-      //TODO: Include timezone hours(tz_hr) and timezone minutes(tz_mn) in date time calculation.
       new_ptime = boost::posix_time::ptime(boost::gregorian::date(yr, mo, dy),
                           boost::posix_time::hours(hr) +
                           boost::posix_time::minutes(mn) +
                           boost::posix_time::seconds(sc) +
                           boost::posix_time::nanoseconds(frac_sec*1000000000));
-
-      result->set_value(&new_ptime);
     #else
       if (frac_sec < 10)
               frac_sec = frac_sec * 100000;
@@ -814,12 +835,13 @@ struct _fn_to_timestamp : public base_function
       else if (frac_sec < 100000)
               frac_sec = frac_sec * 10;
 
-      //TODO: Include timezone hours(tz_hr) and timezone minutes(tz_mn) in date time calculation.
       new_ptime = boost::posix_time::ptime(boost::gregorian::date(yr, mo, dy),
                           boost::posix_time::time_duration(hr, mn, sc, frac_sec));
-
-      result->set_value(&new_ptime);
     #endif
+
+    tmstmp = std::make_tuple(new_ptime, boost::posix_time::time_duration(tz_hour, tz_mn, 0), (char)tm_zone == 'Z');
+
+    result->set_value(&tmstmp);
 
     return true;
   }
@@ -940,13 +962,35 @@ struct _fn_extract_week_from_timestamp : public base_date_extract
   }
 };
 
+struct _fn_extract_tz_hour_from_timestamp : public base_date_extract
+{
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
+  {
+    param_validation(args);
+
+    result->set_value((int64_t)td.hours());
+    return true;
+  }
+};
+
+struct _fn_extract_tz_minute_from_timestamp : public base_date_extract
+{
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
+  {
+    param_validation(args);
+
+    result->set_value((int64_t)td.minutes());
+    return true;
+  }
+};
+
 struct _fn_diff_year_timestamp : public base_date_diff
 {
   bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     param_validation(args);
 
-    int64_t yr = val_ts2.timestamp()->date().year() - val_ts1.timestamp()->date().year();
+    int64_t yr = ptime2.date().year() - ptime1.date().year();
     result->set_value( yr );
     return true;
   }
@@ -958,8 +1002,8 @@ struct _fn_diff_month_timestamp : public base_date_diff
   {
     param_validation(args);
 
-    int64_t yr = val_ts2.timestamp()->date().year() - val_ts1.timestamp()->date().year();
-    int64_t mon = val_ts2.timestamp()->date().month() - val_ts1.timestamp()->date().month();
+    int64_t yr = ptime2.date().year() - ptime1.date().year();
+    int64_t mon = ptime2.date().month() - ptime1.date().month();
     result->set_value((yr * 12) + mon );
     return true;
   }
@@ -971,7 +1015,7 @@ struct _fn_diff_day_timestamp : public base_date_diff
   {
     param_validation(args);
 
-    boost::gregorian::date_period dp = boost::gregorian::date_period( val_ts1.timestamp()->date(), val_ts2.timestamp()->date());
+    boost::gregorian::date_period dp = boost::gregorian::date_period( ptime1.date(), ptime2.date());
     result->set_value( dp.length().days() );
     return true;
   }
@@ -983,8 +1027,8 @@ struct _fn_diff_hour_timestamp : public base_date_diff
   {
     param_validation(args);
 
-    boost::posix_time::time_duration td_res = (*val_ts2.timestamp() - *val_ts1.timestamp());
-    result->set_value( td_res.hours());
+    boost::posix_time::time_duration td_res = ptime2 - ptime1;
+    result->set_value((int64_t)td_res.hours());
     return true;
   }
 };
@@ -995,8 +1039,8 @@ struct _fn_diff_minute_timestamp : public base_date_diff
   {
     param_validation(args);
 
-    boost::posix_time::time_duration td_res = (*val_ts2.timestamp() - *val_ts1.timestamp());
-    result->set_value((td_res.hours() * 60) + td_res.minutes());
+    boost::posix_time::time_duration td_res = ptime2 - ptime1;
+    result->set_value((int64_t)((td_res.hours() * 60) + td_res.minutes()));
     return true;
   }
 };
@@ -1007,23 +1051,21 @@ struct _fn_diff_second_timestamp : public base_date_diff
   {
     param_validation(args);
 
-    boost::posix_time::time_duration td_res = (*val_ts2.timestamp() - *val_ts1.timestamp());
-    result->set_value((((td_res.hours() * 60) + td_res.minutes()) * 60) + td_res.seconds());
+    boost::posix_time::time_duration td_res = ptime2 - ptime1;
+    result->set_value((int64_t)((((td_res.hours() * 60) + td_res.minutes()) * 60) + td_res.seconds()));
     return true;
   }
 };
 
 struct _fn_add_year_to_timestamp : public base_date_add
 {
-  boost::posix_time::ptime new_ptime;
-
   bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
     param_validation(args);
 
-    new_ptime = *val_ts.timestamp();
     new_ptime += boost::gregorian::years( val_quantity.i64() );
-    result->set_value( &new_ptime );
+    new_tmstmp = std::make_tuple(new_ptime, td, flag);
+    result->set_value( &new_tmstmp );
     return true;
   }
 };
@@ -1035,7 +1077,8 @@ struct _fn_add_month_to_timestamp : public base_date_add
     param_validation(args);
 
     new_ptime += boost::gregorian::months( val_quantity.i64() );
-    result->set_value( &new_ptime );
+    new_tmstmp = std::make_tuple(new_ptime, td, flag);
+    result->set_value( &new_tmstmp );
     return true;
   }
 };
@@ -1047,7 +1090,8 @@ struct _fn_add_day_to_timestamp : public base_date_add
     param_validation(args);
 
     new_ptime += boost::gregorian::days( val_quantity.i64() );
-    result->set_value( &new_ptime );
+    new_tmstmp = std::make_tuple(new_ptime, td, flag);
+    result->set_value( &new_tmstmp );
     return true;
   }
 };
@@ -1059,7 +1103,8 @@ struct _fn_add_hour_to_timestamp : public base_date_add
     param_validation(args);
 
     new_ptime += boost::posix_time::hours( val_quantity.i64() );
-    result->set_value( &new_ptime );
+    new_tmstmp = std::make_tuple(new_ptime, td, flag);
+    result->set_value( &new_tmstmp );
     return true;
   }
 };
@@ -1071,7 +1116,8 @@ struct _fn_add_minute_to_timestamp : public base_date_add
     param_validation(args);
 
     new_ptime += boost::posix_time::minutes( val_quantity.i64() );
-    result->set_value( &new_ptime );
+    new_tmstmp = std::make_tuple(new_ptime, td, flag);
+    result->set_value( &new_tmstmp );
     return true;
   }
 };
@@ -1083,15 +1129,15 @@ struct _fn_add_second_to_timestamp : public base_date_add
     param_validation(args);
 
     new_ptime += boost::posix_time::seconds( val_quantity.i64() );
-    result->set_value( &new_ptime );
+    new_tmstmp = std::make_tuple(new_ptime, td, flag);
+    result->set_value( &new_tmstmp );
     return true;
   }
 };
 
 struct _fn_utcnow : public base_function
 {
-
-  boost::posix_time::ptime now_ptime;
+  timestamp_t now_timestamp;
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
@@ -1102,8 +1148,9 @@ struct _fn_utcnow : public base_function
       throw base_s3select_exception("utcnow does not expect any parameters");
     }
 
-    now_ptime = boost::posix_time::ptime( boost::posix_time::second_clock::universal_time());
-    result->set_value( &now_ptime );
+    boost::posix_time::ptime now_ptime = boost::posix_time::ptime( boost::posix_time::second_clock::universal_time());
+    now_timestamp = std::make_tuple(now_ptime, boost::posix_time::time_duration(0, 0, 0), false);
+    result->set_value( &now_timestamp );
 
     return true;
   }
@@ -2084,6 +2131,14 @@ base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt
 
   case s3select_func_En_t::EXTRACT_WEEK:
     return S3SELECT_NEW(this,_fn_extract_week_from_timestamp);
+    break;
+
+  case s3select_func_En_t::EXTRACT_TIMEZONE_HOUR:
+    return S3SELECT_NEW(this,_fn_extract_tz_hour_from_timestamp);
+    break;
+
+  case s3select_func_En_t::EXTRACT_TIMEZONE_MINUTE:
+    return S3SELECT_NEW(this,_fn_extract_tz_minute_from_timestamp);
     break;
 
   case s3select_func_En_t::DATE_ADD_YEAR:

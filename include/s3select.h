@@ -678,7 +678,7 @@ public:
 
       date_part = (bsc::str_p("year") | bsc::str_p("month") | bsc::str_p("day") | bsc::str_p("hour")  | bsc::str_p("minute") | bsc::str_p("second")) [BOOST_BIND_ACTION(push_date_part)];
 
-      date_part_extract = ((date_part) |  bsc::str_p("week"));
+      date_part_extract = ((date_part) |  bsc::str_p("week") | bsc::str_p("timezone_hour") | bsc::str_p("timezone_minute"));
 
       time_to_string_constant = (bsc::str_p("to_string") >> '(' >> arithmetic_expression >> ',' >> (string)[BOOST_BIND_ACTION(push_string)] >> ')') [BOOST_BIND_ACTION(push_time_to_string_constant)];
 

@@ -413,6 +413,8 @@ struct binop_modulo
   }
 };
 
+typedef std::tuple<boost::posix_time::ptime, boost::posix_time::time_duration, bool> timestamp_t;
+
 class value
 {
 
@@ -422,7 +424,7 @@ public:
     int64_t num;
     char* str;//TODO consider string_view
     double dbl;
-    boost::posix_time::ptime* timestamp;
+    timestamp_t* timestamp;
   } value_t;
 
 private:
@@ -462,7 +464,7 @@ public:
   {
     __val.dbl = d;
   }
-  explicit value(boost::posix_time::ptime* timestamp) : type(value_En_t::TIMESTAMP)
+  explicit value(timestamp_t* timestamp) : type(value_En_t::TIMESTAMP)
   {
     __val.timestamp = timestamp;
   }
@@ -569,7 +571,30 @@ public:
       }
       else if (type == value_En_t::TIMESTAMP)
       {
-        m_to_string =  to_iso_extended_string( *__val.timestamp );
+        boost::posix_time::ptime new_ptime;
+        boost::posix_time::time_duration td;
+        bool flag;
+
+	std::tie(new_ptime, td, flag) = *__val.timestamp;
+
+	if (flag)
+	{
+          m_to_string =  to_iso_extended_string(new_ptime) + "Z";
+	}
+        else
+	{
+          std::string tz_hour = std::to_string(std::abs(td.hours()));
+          std::string tz_mint = std::to_string(std::abs(td.minutes()));
+	  std::string sign;
+          if (td.is_negative())
+            sign = "-";
+	  else
+            sign = "+";
+
+          m_to_string =  to_iso_extended_string(new_ptime) + sign +
+                        std::string(2 - tz_hour.length(), '0') +  tz_hour + ":"
+                        + std::string(2 - tz_mint.length(), '0') +  tz_mint;
+	}
       }
       else if (type == value_En_t::S3NULL)
       {
@@ -635,7 +660,7 @@ public:
     return *this;
   }
 
-  value& operator=(boost::posix_time::ptime* p)
+  value& operator=(timestamp_t* p)
   {
     this->__val.timestamp = p;
     this->type = value_En_t::TIMESTAMP;
@@ -658,7 +683,7 @@ public:
     return __val.dbl;
   }
 
-  boost::posix_time::ptime* timestamp() const
+  timestamp_t* timestamp() const
   {
     return __val.timestamp;
   }
@@ -1237,7 +1262,7 @@ public:
     var_value = i;
   }
 
-  void set_value(boost::posix_time::ptime* p)
+  void set_value(timestamp_t* p)
   {
     var_value = p;
   }
@@ -1802,6 +1827,8 @@ class base_date_extract : public base_function
   protected:
     value val_timestamp;
     boost::posix_time::ptime new_ptime;
+    boost::posix_time::time_duration td;
+    bool flag;
 
   public:
     void param_validation(bs_stmt_vec_t*& args)
@@ -1821,7 +1848,7 @@ class base_date_extract : public base_function
         throw base_s3select_exception("second parameter is not timestamp");
       }
 
-      new_ptime = *val_timestamp.timestamp();
+      std::tie(new_ptime, td, flag) = *val_timestamp.timestamp();
     }
 
 };
@@ -1829,8 +1856,8 @@ class base_date_extract : public base_function
 class base_date_diff : public base_function
 {
   protected:
-    value val_ts1;
-    value val_ts2;
+    boost::posix_time::ptime ptime1;
+    boost::posix_time::ptime ptime2;
 
   public:
     void param_validation(bs_stmt_vec_t*& args)
@@ -1844,7 +1871,7 @@ class base_date_diff : public base_function
       }
 
       base_statement* dt1_param = *iter;
-      val_ts1 = dt1_param->eval();
+      value val_ts1 = dt1_param->eval();
 
       if (val_ts1.is_timestamp() == false)
       {
@@ -1853,12 +1880,25 @@ class base_date_diff : public base_function
 
       iter++;
       base_statement* dt2_param = *iter;
-      val_ts2 = dt2_param->eval();
+      value val_ts2 = dt2_param->eval();
 
       if (val_ts2.is_timestamp() == false)
       {
         throw base_s3select_exception("third parameter should be timestamp");
       }
+
+      boost::posix_time::ptime ts1_ptime;
+      boost::posix_time::time_duration ts1_td;
+      boost::posix_time::ptime ts2_ptime;
+      boost::posix_time::time_duration ts2_td;
+
+      std::tie(ts1_ptime, ts1_td, std::ignore) = *val_ts1.timestamp();
+      std::tie(ts2_ptime, ts2_td, std::ignore) = *val_ts2.timestamp();
+
+      ptime1 = ts1_ptime + boost::posix_time::hours(ts1_td.hours() * -1);
+      ptime1 += boost::posix_time::minutes(ts1_td.minutes() * -1);
+      ptime2 = ts2_ptime + boost::posix_time::hours(ts2_td.hours() * -1);
+      ptime2 += boost::posix_time::minutes(ts2_td.minutes() * -1);
     }
 
 };
@@ -1867,8 +1907,10 @@ class base_date_add : public base_function
 {
   protected:
     value val_quantity;
-    value val_ts;
     boost::posix_time::ptime new_ptime;
+    boost::posix_time::time_duration td;
+    bool flag;
+    timestamp_t new_tmstmp;
 
   public:
     void param_validation(bs_stmt_vec_t*& args)
@@ -1891,14 +1933,14 @@ class base_date_add : public base_function
 
       iter++;
       base_statement* ts = *iter;
-      val_ts = ts->eval();
+      value val_ts = ts->eval();
 
       if(val_ts.is_timestamp() == false)
       {
         throw base_s3select_exception("third parameter should be time-stamp");
       }
 
-      new_ptime = *val_ts.timestamp();
+      std::tie(new_ptime, td, flag) = *val_ts.timestamp();
     }
 
 };
@@ -1910,14 +1952,14 @@ class base_time_to_string
                         "May", "June", "July", "August", "September",
                         "October", "November", "December"};
   public:
-    virtual std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param) = 0;
+    virtual std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param) = 0;
     virtual ~base_time_to_string() = default;
 };
 
 class derive_yyyy : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t yr = new_ptime.date().year();
       return std::string(param - 4, '0') + std::to_string(yr);
@@ -1927,7 +1969,7 @@ class derive_yyyy : public base_time_to_string
 class derive_yy : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t yr = new_ptime.date().year();
       return std::string(2 - std::to_string(yr%100).length(), '0') + std::to_string(yr%100);
@@ -1937,7 +1979,7 @@ class derive_yy : public base_time_to_string
 class derive_y : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t yr = new_ptime.date().year();
       return std::to_string(yr);
@@ -1947,7 +1989,7 @@ class derive_y : public base_time_to_string
 class derive_mmmmm_month : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t mnth = new_ptime.date().month();
       return (months[mnth - 1]).substr(0, 1);
@@ -1957,7 +1999,7 @@ class derive_mmmmm_month : public base_time_to_string
 class derive_mmmm_month : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t mnth = new_ptime.date().month();
       return months[mnth - 1];
@@ -1967,7 +2009,7 @@ class derive_mmmm_month : public base_time_to_string
 class derive_mmm_month : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t mnth = new_ptime.date().month();
       return (months[mnth - 1]).substr(0, 3);
@@ -1977,7 +2019,7 @@ class derive_mmm_month : public base_time_to_string
 class derive_mm_month : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t mnth = new_ptime.date().month();
       std::string mnth_str = std::to_string(mnth);
@@ -1988,7 +2030,7 @@ class derive_mm_month : public base_time_to_string
 class derive_m_month : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t mnth = new_ptime.date().month();
       return std::to_string(mnth);
@@ -1998,7 +2040,7 @@ class derive_m_month : public base_time_to_string
 class derive_dd : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string day = std::to_string(new_ptime.date().day());
       return std::string(2 - day.length(), '0') + day;
@@ -2008,7 +2050,7 @@ class derive_dd : public base_time_to_string
 class derive_d : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string day = std::to_string(new_ptime.date().day());
       return day;
@@ -2018,7 +2060,7 @@ class derive_d : public base_time_to_string
 class derive_a : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t hr = new_ptime.time_of_day().hours();
       std::string meridiem = (hr < 12 ? "AM" : "PM");
@@ -2029,7 +2071,7 @@ class derive_a : public base_time_to_string
 class derive_hh : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t hr = new_ptime.time_of_day().hours();
       std::string hr_12 = std::to_string(hr%12 == 0 ? 12 : hr%12);
@@ -2040,7 +2082,7 @@ class derive_hh : public base_time_to_string
 class derive_h : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t hr = new_ptime.time_of_day().hours();
       std::string hr_12 = std::to_string(hr%12 == 0 ? 12 : hr%12);
@@ -2051,7 +2093,7 @@ class derive_h : public base_time_to_string
 class derive_h2 : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t hr = new_ptime.time_of_day().hours();
       std::string hr_24 = std::to_string(hr);
@@ -2062,7 +2104,7 @@ class derive_h2 : public base_time_to_string
 class derive_h1 : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       int64_t hr = new_ptime.time_of_day().hours();
       return std::to_string(hr);
@@ -2072,7 +2114,7 @@ class derive_h1 : public base_time_to_string
 class derive_mm : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string mint = std::to_string(new_ptime.time_of_day().minutes());
       return std::string(2 - mint.length(), '0') + mint;
@@ -2082,7 +2124,7 @@ class derive_mm : public base_time_to_string
 class derive_m : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string mint = std::to_string(new_ptime.time_of_day().minutes());
       return mint;
@@ -2092,7 +2134,7 @@ class derive_m : public base_time_to_string
 class derive_ss : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string sec =  std::to_string(new_ptime.time_of_day().seconds());
       return std::string(2 - sec.length(), '0') + sec;
@@ -2102,7 +2144,7 @@ class derive_ss : public base_time_to_string
 class derive_s : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string sec =  std::to_string(new_ptime.time_of_day().seconds());
       return sec;
@@ -2112,7 +2154,7 @@ class derive_s : public base_time_to_string
 class derive_frac_sec : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string frac_seconds = std::to_string(new_ptime.time_of_day().fractional_seconds());
       if (param >= frac_seconds.length())
@@ -2129,17 +2171,105 @@ class derive_frac_sec : public base_time_to_string
 class derive_n : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       std::string frac_seconds = std::to_string(new_ptime.time_of_day().fractional_seconds());
       return frac_seconds + std::string(9 - frac_seconds.length(), '0');
     }
 } n_to_string;
 
+class derive_x1 : public base_time_to_string
+{
+  public:
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
+    {
+      int tz_hour = td.hours();
+      if (tz_hour == 0 && td.minutes() == 0)
+      {
+        return "Z";
+      }
+      else
+      {
+        std::string tz_hr = std::to_string(std::abs(tz_hour));
+        return (td.is_negative() ? "-" : "+") + std::string(2 - tz_hr.length(), '0') + tz_hr;
+      }
+    }
+} x1_to_string;
+
+class derive_x2 : public base_time_to_string
+{
+  public:
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
+    {
+      int tz_hour = td.hours();
+      int tz_minute = td.minutes();
+      if (tz_hour == 0 && tz_minute == 0)
+      {
+        return "Z";
+      }
+      else
+      {
+        std::string tz_hr = std::to_string(std::abs(tz_hour));
+	std::string tz_mn = std::to_string(std::abs(tz_minute));
+        return (td.is_negative() ? "-" : "+") + std::string(2 - tz_hr.length(), '0') + tz_hr + std::string(2 - tz_mn.length(), '0') + tz_mn;
+      }
+    }
+} x2_to_string;
+
+class derive_x3 : public base_time_to_string
+{
+  public:
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
+    {
+      int tz_hour = td.hours();
+      int tz_minute = td.minutes();
+      if (tz_hour == 0 && tz_minute == 0)
+      {
+        return "Z";
+      }
+      else
+      {
+        std::string tz_hr = std::to_string(std::abs(tz_hour));
+        std::string tz_mn = std::to_string(std::abs(tz_minute));
+        return (td.is_negative() ? "-" : "+") + std::string(2 - tz_hr.length(), '0') + tz_hr + ":" + std::string(2 - tz_mn.length(), '0') + tz_mn;
+      }
+    }
+} x3_to_string;
+
+class derive_x : public base_time_to_string
+{
+  public:
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
+    {
+      return std::to_string(td.hours());
+    }
+} x_to_string;
+
+class derive_xx : public base_time_to_string
+{
+  public:
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
+    {
+      std::string tz_mn = std::to_string(std::abs(td.minutes()));
+      return std::to_string(td.hours()) + std::string(2 - tz_mn.length(), '0') + tz_mn;
+    }
+} xx_to_string;
+
+class derive_xxx : public base_time_to_string
+{
+  public:
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
+    {
+      std::string tz_hr = std::to_string(std::abs(td.hours()));
+      std::string tz_mn = std::to_string(std::abs(td.minutes()));
+      return (td.is_negative() ? "-" : "+") + std::string(2 - tz_hr.length(), '0') + tz_hr + ":" + std::string(2 - tz_mn.length(), '0') + tz_mn;
+    }
+} xxx_to_string;
+
 class derive_delimiter : public base_time_to_string
 {
   public:
-    std::string print_time(boost::posix_time::ptime& new_ptime, uint32_t param)
+    std::string print_time(boost::posix_time::ptime& new_ptime, boost::posix_time::time_duration& td, uint32_t param)
     {
       char ch = param;
       return std::string(1, ch);
@@ -2150,11 +2280,14 @@ class base_timestamp_to_string : public base_function
 {
   protected:
     boost::posix_time::ptime new_ptime;
+    boost::posix_time::time_duration td;
+    bool flag;
     std::string format;
-    std::vector<char> m_metachar {'y', 'M', 'd', 'a', 'h', 'H', 'm', 's', 'S', 'n'};
-    std::vector<std::string> m_metaword_vec {"yyy", "yy", "y", "MMMMM", "MMMM",
-                                "MMM", "MM", "M", "dd", "d", "a", "hh", "h",
-                                "HH", "H", "mm", "m", "ss", "s", "n"};
+    std::vector<char> m_metachar {'y', 'M', 'd', 'a', 'h', 'H', 'm', 's', 'S', 'n', 'X', 'x'};
+    std::vector<std::string> m_metaword_vec {"yyy", "yy", "y", "MMMMM", "MMMM", "MMM", "MM", "M",
+                                    "dd", "d", "a", "hh", "h", "HH", "H", "mm", "m", "ss", "s", "n",
+                                    "XXXXX", "XXXX", "XXX", "XX", "X", "xxxxx", "xxxx", "xxx", "xx",
+                                    "x"};
     std::vector<base_time_to_string*> print_vector;
     std::vector<uint32_t> para;
     bool initialized = false;
@@ -2185,6 +2318,16 @@ class base_timestamp_to_string : public base_function
       {"s", &s_to_string},
       {"S+", &frac_sec_to_string},
       {"n", &n_to_string},
+      {"XXXXX", &x3_to_string},
+      {"XXXX", &x2_to_string},
+      {"XXX", &x3_to_string},
+      {"XX", &x2_to_string},
+      {"X", &x1_to_string},
+      {"xxxxx", &xxx_to_string},
+      {"xxxx", &xx_to_string},
+      {"xxx", &xxx_to_string},
+      {"xx", &xx_to_string},
+      {"x", &x_to_string},
       {"delimiter", &delimiter_to_string}
     };
 
@@ -2216,7 +2359,7 @@ class base_timestamp_to_string : public base_function
         throw base_s3select_exception("second parameter should be string");
       }
 
-      new_ptime = *val_timestamp.timestamp();
+      std::tie(new_ptime, td, flag) = *val_timestamp.timestamp();
       format = val_format.to_string();
     }
 
@@ -2280,7 +2423,7 @@ class base_timestamp_to_string : public base_function
       int temp = 0;
       for(auto p : print_vector)
       {
-        res += p->print_time(new_ptime, para.at(temp));
+        res += p->print_time(new_ptime, td, para.at(temp));
         temp++;
       }
       return res;
