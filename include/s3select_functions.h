@@ -1026,7 +1026,7 @@ struct _fn_extract_day_from_timestamp : public base_date_extract
   {
     param_validation(args);
 
-    result->set_value( (int64_t)new_ptime.date().day_of_year());
+    result->set_value( (int64_t)new_ptime.date().day());
     return true;
   }
 };

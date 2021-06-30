@@ -540,7 +540,7 @@ TEST(TestS3selectFunctions, extract)
 
     input_query = "select extract(day from to_timestamp(\'2009-09-17T17:56:06.234567Z\')) from stdin;" ;
     s3select_res = run_s3select(input_query);
-    EXPECT_EQ(s3select_res, "260");
+    EXPECT_EQ(s3select_res, "17");
 
     input_query = "select extract(week from to_timestamp(\'2009-09-17T17:56:06.234567Z\')) from stdin;" ;
     s3select_res = run_s3select(input_query);
