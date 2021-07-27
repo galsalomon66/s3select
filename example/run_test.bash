@@ -77,7 +77,7 @@ if test "$s3select_val" -ne "$awk_val"; then
 fi
 echo check substr and count 
 s3select_val=$("$PREFIX"/generate_rand_csv 10000 10 | "$PREFIX"/s3select_example -q 'select count(int(_1)) from stdin where int(_1)>200 and int(_1)<250;')
-awk_val=$("$PREFIX"/generate_rand_csv 10000 10 | "$PREFIX"/s3select_example -q 'select substr(_1,1,1) from stdin where int(_1)>200 and int(_1)<250;' | uniq -c | awk '{print $1;}')
+awk_val=$("$PREFIX"/generate_rand_csv 10000 10 | "$PREFIX"/s3select_example -q 'select substring(_1,1,1) from stdin where int(_1)>200 and int(_1)<250;' | uniq -c | awk '{print $1;}')
 s3select_val=${s3select_val::-1}
 echo "$s3select_val" "$awk_val"
 if test "$s3select_val" -ne "$awk_val"; then

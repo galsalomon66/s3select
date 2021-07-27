@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <boost/crc.hpp>
 #include <arpa/inet.h>
+#include <boost/filesystem.hpp>
+#include <boost/tokenizer.hpp>
 
 using namespace s3selectEngine;
 using namespace BOOST_SPIRIT_CLASSIC_NS;
@@ -250,12 +252,13 @@ const char* awsCli_handler::header_name_str[3] = {":event-type", ":content-type"
 const char* awsCli_handler::header_value_str[4] = {"Records", "application/octet-stream", "event","cont"};
 int run_on_localFile(char*  input_query);
 
-int main(int argc,char **argv)
+int main_single_query(int argc,char **argv)
 {
+//purpose:to run the engine on a single query.
 awsCli_handler awscli;
 
-  char *query;
-  char *fname;
+  char *query=0;
+  char *fname=0;
 
   bool using_key_flag = false;
 
@@ -296,7 +299,7 @@ awsCli_handler awscli;
   s3selectEngine::csv_object::csv_defintions csv;
   csv.use_header_info = false;
 
-#define BUFFER_SIZE 1024  * 4 //simulate 4mb parts in s3-objects
+#define BUFFER_SIZE (1024 *1024  * 4) //simulate 4mb parts in s3-objects
   char *buff = (char *)malloc(BUFFER_SIZE);
   while (1)
   {
@@ -424,3 +427,113 @@ int run_on_localFile(char*  input_query)
 
   return 0;
 }
+
+int run_on_single_query(const char* fname, const char* query)
+{
+
+  std::unique_ptr<awsCli_handler> awscli = std::make_unique<awsCli_handler>() ;
+  std::ifstream input_file_stream;
+  try {
+  	input_file_stream = std::ifstream(fname, std::ios::in | std::ios::binary);
+  }
+  catch( ... )
+  {
+	std::cout << "failed to open file " << fname << std::endl;	
+	exit(-1);
+  }
+
+  int status;
+  auto file_sz = boost::filesystem::file_size(fname);
+
+  s3selectEngine::csv_object::csv_defintions csv;
+  csv.use_header_info = false;
+
+  std::string buff(BUFFER_SIZE,0);
+  while (1)
+  {
+    size_t read_sz = input_file_stream.readsome(buff.data(),BUFFER_SIZE);
+
+    status = awscli->run_s3select(query, buff.data(), read_sz, file_sz);
+    if(status<0)
+    {
+      std::cout << "failure on execution " << std::endl;
+      break;
+    }
+    else 
+    {
+    	std::cout << awscli->get_result() << std::endl;
+    }
+
+    if(!read_sz || input_file_stream.eof())
+    {
+      break;
+    }
+  }
+
+  return status;
+}
+
+int main(int argc,char **argv)
+{
+//purpose: run many queries (reside in file) on single file.
+
+	char *query=0;
+	char *fname=0;
+	char *query_file=0;//file contains many queries
+
+	for (int i = 0; i < argc; i++)
+	{
+
+		if (!strcmp(argv[i], "-key"))
+		{
+			fname = argv[i + 1];
+			continue;
+		}
+
+		if (!strcmp(argv[i], "-q"))
+		{
+			query = argv[i + 1];
+			continue;
+		}
+
+		if (!strcmp(argv[i], "-cmds"))
+		{
+			query_file = argv[i + 1];
+			continue;
+		}
+	}
+
+	if(fname  == 0)
+	{//object is in query explicitly.
+		return run_on_localFile(query);
+	}
+
+	if(query_file)
+	{
+		std::fstream f(query_file, std::ios::in | std::ios::binary);
+
+		const auto sz = boost::filesystem::file_size(query_file);
+
+		std::string result(sz, '\0');
+
+		f.read(result.data(), sz);
+
+		boost::char_separator<char> sep("\n");
+		boost::tokenizer<boost::char_separator<char>> tokens(result, sep);
+		for (const auto& t : tokens) {
+			std::cout << t << std::endl;
+
+			int status = run_on_single_query(fname,t.c_str());
+
+			std::cout << "status: " << status << std::endl;
+		}
+		
+		return(0);
+	}
+
+
+	int status = run_on_single_query(fname,query);
+
+	return status;
+}
+
