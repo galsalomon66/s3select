@@ -349,7 +349,14 @@ private:
       return;
     }
 
-    base_function* f = m_s3select_functions->create(name,arguments);
+    auto string_to_lower = [](std::string s)
+    {
+      std::transform(s.begin(),s.end(),s.begin(),[](unsigned char c){ return std::tolower(c); });
+      return s;
+    };
+
+    //the function name is converted into lowercase to enable case-insensitive 
+    base_function* f = m_s3select_functions->create(string_to_lower(name),arguments);
     if (!f)
     {
       throw base_s3select_exception("function not found", base_s3select_exception::s3select_exp_en_t::FATAL);  //should abort query
