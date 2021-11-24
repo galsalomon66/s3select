@@ -374,6 +374,13 @@ int run_on_localFile(char*  input_query)
   //csv.row_delimiter='\t';
 
 
+  csv.quote_fields_always=false;
+
+  if(getenv("CSV_ALWAYS_QUOT"))
+  {
+	csv.quote_fields_always=true;
+  }
+  	
   s3selectEngine::csv_object  s3_csv_object(&s3select_syntax, csv);
 
 #define BUFF_SIZE 1024*1024*4 //simulate 4mb parts in s3 object

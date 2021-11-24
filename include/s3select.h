@@ -1135,6 +1135,10 @@ void push_column_pos::builder(s3select* self, const char* a, const char* b) cons
   if (token == "*" || token == "* ") //TODO space should skip in boost::spirit
   {
     v = S3SELECT_NEW(self, variable, token, variable::var_t::STAR_OPERATION);
+
+    //NOTE: variable may leak upon star-operation(multi_value object is not destruct entirly, it contain stl-vactor which is allocated on heap).
+    //TODO: find a generic way for such use-cases, one possible solution is to push all-nodes(upon AST is complete) into cleanup-container.
+    self->getS3F()->push_for_cleanup(v);
   }
   else
   {
@@ -1287,6 +1291,9 @@ void push_like_predicate_no_escape::builder(s3select* self, const char* a, const
   
   variable* v = S3SELECT_NEW(self, variable, "\\",variable::var_t::COL_VALUE);
   func->push_argument(v);
+  
+  // experimenting valgrind-issue happens only on teuthology
+  //self->getS3F()->push_for_cleanup(v);
   
   base_statement* like_expr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
@@ -1736,12 +1743,19 @@ public:
   {
     char row_delimiter;
     char column_delimiter;
+    char output_row_delimiter;
+    char output_column_delimiter;
     char escape_char;
+    char output_escape_char;
+    char output_quot_char;
     char quot_char;
     bool use_header_info;
     bool ignore_header_info;//skip first line
+    bool quote_fields_always;
+    bool quote_fields_asneeded;
+    bool redundant_column;
 
-    csv_defintions():row_delimiter('\n'), column_delimiter(','), escape_char('\\'), quot_char('"'), use_header_info(false), ignore_header_info(false) {}
+    csv_defintions():row_delimiter('\n'), column_delimiter(','), output_row_delimiter('\n'), output_column_delimiter(','), escape_char('\\'), output_escape_char('\\'), output_quot_char('"'), quot_char('"'), use_header_info(false), ignore_header_info(false), quote_fields_always(false), quote_fields_asneeded(false), redundant_column(true) {}
 
   } m_csv_defintion;
 
@@ -1868,10 +1882,40 @@ public:
 
 public:
 
+  void result_values_to_string(multi_values& projections_resuls, std::string& result)
+  {
+    size_t i = 0;
+    std::string output_delimiter(1,m_csv_defintion.output_column_delimiter);
+
+    for(auto res : projections_resuls.values)
+    {
+            if (m_csv_defintion.quote_fields_always) {
+              std::ostringstream quoted_result;
+              quoted_result << std::quoted(res->to_string(),m_csv_defintion.output_quot_char, m_csv_defintion.escape_char);
+              result.append(quoted_result.str());
+            }//TODO to add asneeded
+	    else
+	    {
+            	result.append( res->to_string() );
+	    }
+
+            if(!m_csv_defintion.redundant_column) {
+              if(++i < projections_resuls.values.size()) {
+                result.append(output_delimiter);
+              }
+            }
+            else {
+              result.append(output_delimiter);
+            }    
+    }
+  }
 
   int getMatchRow( std::string& result) //TODO virtual ? getResult
   {
     int number_of_tokens = 0;
+    std::string output_delimiter(1,m_csv_defintion.output_row_delimiter);
+    multi_values projections_resuls;
+    
 
 
     if (m_aggr_flow == true)
@@ -1882,15 +1926,17 @@ public:
         number_of_tokens = getNextRow();
         if (number_of_tokens < 0) //end of stream
         {
+          projections_resuls.clear();
           if (m_is_to_aggregate)
             for (auto& i : m_projections)
             {
               i->set_last_call();
               i->set_skip_non_aggregate(false);//projection column is set to be runnable
-              result.append( i->eval().to_string() );
-              result.append(",");
+
+              projections_resuls.push_value( &(i->eval()) );
             }
 
+          result_values_to_string(projections_resuls,result);
           return number_of_tokens;
         }
 
@@ -1936,12 +1982,13 @@ public:
       }
       while (m_where_clause && !m_where_clause->eval().is_true());
 
+      projections_resuls.clear();
       for (auto& i : m_projections)
       {
-        result.append( i->eval().to_string() );
-        result.append(",");
+        projections_resuls.push_value( &(i->eval()) );
       }
-      result.append("\n");
+      result_values_to_string(projections_resuls,result);
+      result.append(output_delimiter);
     }
 
     return number_of_tokens; //TODO wrong

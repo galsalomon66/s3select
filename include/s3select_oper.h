@@ -153,9 +153,10 @@ class s3select_allocator //s3select is the "owner"
 private:
 
   std::vector<char*> list_of_buff;
+  std::vector<char*> list_of_ptr;
   u_int32_t m_idx;
 
-#define __S3_ALLOCATION_BUFF__ (8*1024)
+#define __S3_ALLOCATION_BUFF__ (24*1024)
   void check_capacity(size_t sz)
   {
     if (sz>__S3_ALLOCATION_BUFF__)
@@ -195,11 +196,21 @@ public:
     return &buff[ idx ];
   }
 
+  void push_for_delete(void *p)
+  {//in case of using S3SELECT_NO_PLACEMENT_NEW
+    list_of_ptr.push_back((char*)p);
+  }
+
   virtual ~s3select_allocator()
   {
     for(auto b : list_of_buff)
     {
       free(b);
+    }
+
+    for(auto b : list_of_ptr)
+    {//in case of using S3SELECT_NO_PLACEMENT_NEW
+      delete(b);
     }
   }
 };
@@ -208,6 +219,15 @@ public:
 #define S3SELECT_NEW(self, type , ... ) [=]() \
         {   \
             auto res=new (self->getAllocator()->alloc(sizeof(type))) type(__VA_ARGS__); \
+            return res; \
+        }();
+
+// no placement new; actually, its an oridinary new with additional functionality for deleting the AST nodes.
+// (this changes, is for verifying the valgrind report on leak)
+#define S3SELECT_NO_PLACEMENT_NEW(self, type , ... ) [=]() \
+        {   \
+            auto res=new type(__VA_ARGS__); \
+	    self->getAllocator()->push_for_delete(res); \
             return res; \
         }();
 
@@ -415,6 +435,22 @@ struct binop_modulo
 
 typedef std::tuple<boost::posix_time::ptime, boost::posix_time::time_duration, bool> timestamp_t;
 
+class value;
+class multi_values
+{
+  public:
+  std::vector<value*> values;
+
+  public:
+  void push_value(value* v);
+
+  void clear()
+  {
+    values.clear();
+  }
+
+};
+
 class value
 {
 
@@ -422,10 +458,12 @@ public:
   typedef union
   {
     int64_t num;
-    char* str;//TODO consider string_view
+    char* str;//TODO consider string_view(save copy)
     double dbl;
     timestamp_t* timestamp;
   } value_t;
+
+  multi_values multiple_values;
 
 private:
   value_t __val;
@@ -444,6 +482,7 @@ public:
     S3NULL,
     S3NAN,
     BOOL,
+    MULTIPLE_VALUES,
     NA
   } ;
   value_En_t type;
@@ -473,6 +512,11 @@ public:
   {
     m_str_value.assign(s);
     __val.str = m_str_value.data();
+  }
+
+  ~value()
+  {//TODO should be a part of the cleanup routine(__function::push_for_cleanup)
+    multiple_values.values.clear();
   }
 
   value():type(value_En_t::NA)
@@ -977,6 +1021,22 @@ public:
   }
 };
 
+void multi_values::push_value(value *v)
+{
+  //v could be single or multiple values
+  if (v->type == value::value_En_t::MULTIPLE_VALUES)
+  {
+    for (auto sv : v->multiple_values.values)
+    {
+      values.push_back(sv);
+    }
+  }
+  else
+  {
+    values.push_back(v);
+  }
+}
+
 class base_statement
 {
 
@@ -1168,7 +1228,8 @@ private:
   int column_pos;
   value var_value;
   std::string m_star_op_result;
-  char m_star_op_result_charc[4096]; //TODO should be dynamic
+  char m_star_op_result_charc[4096]; //TODO cause larger allocations for other objects containing variable (dynamic is one solution)
+  value star_operation_values[16];//TODO cause larger allocations for other objects containing variable (dynamic is one solution)
 
   const int undefined_column_pos = -1;
   const int column_alias = -2;
@@ -1298,15 +1359,20 @@ public:
     return var_value.type;
   }
 
-
   value& star_operation()   //purpose return content of all columns in a input stream
   {
 
-
-    int i;
+    
     size_t pos=0;
-    int num_of_columns = m_scratch->get_num_of_columns();
-    for(i=0; i<num_of_columns-1; i++)
+    size_t num_of_columns = m_scratch->get_num_of_columns();
+    var_value.multiple_values.clear(); //TODO var_value.clear()??
+
+    if(sizeof(star_operation_values)/sizeof(value) < num_of_columns)
+    {
+        throw base_s3select_exception(std::string("not enough memory for star-operation"), base_s3select_exception::s3select_exp_en_t::FATAL);
+    }
+
+    for(size_t i=0; i<num_of_columns; i++)
     {
       size_t len = m_scratch->get_column_value(i).size();
       if((pos+len)>sizeof(m_star_op_result_charc))
@@ -1314,22 +1380,19 @@ public:
         throw base_s3select_exception("result line too long", base_s3select_exception::s3select_exp_en_t::FATAL);
       }
 
-      memcpy(&m_star_op_result_charc[pos], m_scratch->get_column_value(i).data(), len);
+      memcpy(&m_star_op_result_charc[pos], m_scratch->get_column_value(i).data(), len);//TODO using string_view will avoid copy
+      m_star_op_result_charc[ pos + len ] = 0;
+
+      star_operation_values[i] = &m_star_op_result_charc[pos];//set string value
+      var_value.multiple_values.push_value( &star_operation_values[i] );
+
       pos += len;
-      m_star_op_result_charc[ pos ] = ',';//TODO need for another abstraction (per file type)
       pos ++;
 
     }
 
-    size_t len = m_scratch->get_column_value(i).size();
-    if((pos+len)>sizeof(m_star_op_result_charc))
-    {
-      throw base_s3select_exception("result line too long", base_s3select_exception::s3select_exp_en_t::FATAL);
-    }
+    var_value.type = value::value_En_t::MULTIPLE_VALUES;
 
-    memcpy(&m_star_op_result_charc[pos], m_scratch->get_column_value(i).data(), len);
-    m_star_op_result_charc[ pos + len ] = 0;
-    var_value = (char*)&m_star_op_result_charc[0];
     return var_value;
   }
 

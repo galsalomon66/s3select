@@ -336,7 +336,7 @@ class __function : public base_statement
 
 private:
   bs_stmt_vec_t arguments;
-  std::string name;
+  std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> name;
   base_function* m_func_impl;
   s3select_functions* m_s3select_functions;
   variable m_result;
@@ -349,7 +349,7 @@ private:
       return;
     }
 
-    auto string_to_lower = [](std::string s)
+    auto string_to_lower = [](std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> s)
     {
       std::transform(s.begin(),s.end(),s.begin(),[](unsigned char c){ return std::tolower(c); });
       return s;

@@ -1,3 +1,8 @@
+/*
+ * /usr/include/boost/bind.hpp:36:1: note: ‘#pragma message: The practice of declaring the Bind placeholders (_1, _2, ...) in the global namespace is deprecated. Please use <boost/bind/bind.hpp> + using namespace boost::placeholders, or define BOOST_BIND_GLOBAL_PLACEHOLDERS to retain the current behavior.’
+ */
+#define BOOST_BIND_GLOBAL_PLACEHOLDERS
+
 #include "s3select.h"
 #include "gtest/gtest.h"
 #include <string>
@@ -125,6 +130,25 @@ public:
 
 const std::string failure_sign("#failure#");
 
+std::string string_to_quot(std::string& s, char quot = '"')
+{
+  std::string result = "";
+  std::stringstream str_strm;
+  str_strm << s;
+  std::string temp_str;
+  int temp_int;
+  while(!str_strm.eof()) {
+    str_strm >> temp_str;
+    if(std::stringstream(temp_str) >> temp_int) {
+      std::stringstream s1;
+      s1 << temp_int;
+      result +=  quot + s1.str() +  quot + ","  + "\n";
+    }
+    temp_str = "";
+  }
+  return result;
+}
+
 std::string run_s3select(std::string expression)
 {//purpose: run query on single row and return result(single projections).
   s3select s3select_syntax;
@@ -143,6 +167,63 @@ std::string run_s3select(std::string expression)
   s3select_result = s3select_result.substr(0, s3select_result.find_first_of(","));
 
   return s3select_result;
+}
+
+void run_s3select_test_opserialization(std::string expression,std::string input, char *row_delimiter, char *column_delimiter)
+{//purpose: run query on multiple rows and return result(multiple projections).
+    s3select s3select_syntax;
+  
+    int status = s3select_syntax.parse_query(expression.c_str());
+
+    if(status)
+      return;
+
+    std::string s3select_result;
+    csv_object::csv_defintions csv;
+
+    csv.output_row_delimiter = *row_delimiter;
+    csv.output_column_delimiter = *column_delimiter;
+
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax, csv);
+
+    s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), false, false, true);
+
+    std::string s3select_result1 = s3select_result;
+
+    csv.row_delimiter = *row_delimiter;
+    csv.column_delimiter = *column_delimiter;
+    csv.output_row_delimiter = *row_delimiter;
+    csv.output_column_delimiter = *column_delimiter;
+    csv.redundant_column = false;
+    std::string s3select_result_second_phase;
+
+    s3selectEngine::csv_object s3_csv_object_second(&s3select_syntax, csv);
+
+    s3_csv_object_second.run_s3select_on_object(s3select_result_second_phase, s3select_result.c_str(), s3select_result.size(), false, false, true);
+
+    ASSERT_EQ(s3select_result_second_phase, s3select_result1);
+}
+
+std::string run_s3select_opserialization_quot(std::string expression,std::string input, bool quot_always = false, char quot_char = '"')
+{//purpose: run query on multiple rows and return result(multiple projections).
+    s3select s3select_syntax;
+  
+    int status = s3select_syntax.parse_query(expression.c_str());
+
+    if(status)
+      return failure_sign;
+
+    std::string s3select_result;
+    csv_object::csv_defintions csv;
+
+    csv.quote_fields_always = quot_always;
+    csv.output_quot_char = quot_char;
+
+    s3selectEngine::csv_object s3_csv_object(&s3select_syntax, csv);
+
+    s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(), false, false, true);
+
+    return s3select_result;
 }
 
 std::string run_s3select(std::string expression,std::string input)
@@ -990,9 +1071,9 @@ TEST(TestS3selectFunctions, binop_constant)
 }
 
 TEST(TestS3selectOperator, add)
-{
+{ 
     const std::string input_query = "select -5 + 0.5 + -0.25 from stdin;" ;
-	  auto s3select_res = run_s3select(input_query);
+    auto s3select_res = run_s3select(input_query);
     ASSERT_EQ(s3select_res, std::string("-4.75"));
 }
 
@@ -1116,11 +1197,12 @@ TEST(TestS3selectFunctions, floatavg)
   std::string input;
   size_t size = 128;
   generate_columns_csv(input, size);
+
   const std::string input_query_1 = "select avg(float(_1)) from stdin;";
 
   std::string s3select_result_1 = run_s3select(input_query_1,input);
 
-  ASSERT_EQ(s3select_result_1,"63.5,");
+  ASSERT_EQ(s3select_result_1,std::string("63.5,"));
 }
 
 TEST(TestS3selectFunctions, case_when_condition_multiplerows)
@@ -2648,3 +2730,77 @@ TEST(TestS3selectFunctions, nested_query_multirow_result)
   s3select_res = run_s3select(input_query, input_csv);
   EXPECT_EQ(s3select_res, expected_res);
 }
+
+TEST(TestS3selectFunctions, opserialization_expressions)
+{
+  std::string input;
+  size_t size = 10;
+  generate_rand_columns_csv(input, size);
+
+  char a[5] = {'@', '#', '$', '%'};
+  char b[4] = {'!', '^', '&', '*'};
+  char x = a[rand() % 4];
+  char y = b[rand() % 4];
+
+  const std::string input_query = "select * from s3object ;";
+
+  run_s3select_test_opserialization(input_query, input, &x, &y);
+
+  const std::string input_query_1 = "select int(_1) from s3object where  nullif(_1, _2) is not null;";
+
+  std::string s3select_result_1 = run_s3select_opserialization_quot(input_query_1,input, true);
+
+  const std::string input_query_2 = "select int(_1) from s3object where int(_1) != int(_2);";
+
+  std::string s3select_result_2 = run_s3select(input_query_2,input);
+
+  std::string s3select_result_2_final = string_to_quot(s3select_result_2);
+
+  ASSERT_EQ(s3select_result_1, s3select_result_2_final);
+
+  const std::string input_query_3 = "select int(_1) from s3object where int(_1) != int(_2);";
+
+  std::string s3select_result_3 = run_s3select_opserialization_quot(input_query_3,input);
+
+  ASSERT_NE(s3select_result_1, s3select_result_3);
+
+  const std::string input_query_4 = "select int(_1) from s3object where  nullif(_1, _2) is not null;";
+
+  std::string s3select_result_4 = run_s3select_opserialization_quot(input_query_4,input, true, x);
+
+  const std::string input_query_5 = "select int(_1) from s3object where int(_1) != int(_2);";
+
+  std::string s3select_result_5 = run_s3select(input_query_5,input);
+
+  std::string s3select_result_5_final = string_to_quot(s3select_result_5, x);
+
+  ASSERT_EQ(s3select_result_4, s3select_result_5_final);
+
+  ASSERT_NE(s3select_result_4, s3select_result_1);
+}
+
+TEST(TestS3selectFunctions, presto_syntax_alignments)
+{
+/*
+ * the purpose of this test is to compare 2 queries with different syntax but with the same semantics
+ * differences are case-insensitive, table-alias, semicolon at the end-of-statement
+ */
+
+  std::string input;
+  size_t size = 10000;
+
+  generate_rand_csv(input, size);
+  std::string input_for_presto = input;
+
+  const std::string input_query = "select _1,_2 from s3object where _1 = _2;";
+
+  auto s3select_res = run_s3select(input_query, input);
+
+  const std::string input_presto_query = "Select t._1,t._2 fRom s3OBJECT t whEre _1 = _2";
+
+  auto s3select_presto_res = run_s3select(input_presto_query, input_for_presto);
+
+  ASSERT_EQ(s3select_res, s3select_presto_res);
+
+}
+
