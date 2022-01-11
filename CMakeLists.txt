@@ -2,7 +2,15 @@ cmake_minimum_required(VERSION 3.0)
 
 project(s3select)
 
+find_package(Arrow QUIET)
+
+if(Arrow_FOUND)
+  message( "arrow is installed")
+  add_definitions(-D_ARROW_EXIST)
+endif()
+
 set(CMAKE_CXX_FLAGS "-std=gnu++17 -ggdb -Wnon-virtual-dtor -Wreorder -Wunused-variable -Wtype-limits -Wsign-compare -Wmaybe-uninitialized")
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

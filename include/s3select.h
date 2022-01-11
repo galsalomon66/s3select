@@ -2,6 +2,8 @@
 #define __S3SELECT__
 #define BOOST_SPIRIT_THREADSAFE
 
+#pragma once
+#define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <boost/spirit/include/classic_core.hpp>
 #include <boost/algorithm/string.hpp>
 #include <iostream>
@@ -64,10 +66,13 @@ struct actionQ
   std::string table_alias;
   s3select_projections  projections;
 
+  bool projection_or_predicate_state; //true->projection false->predicate(where-clause statement)
+  std::vector<base_statement*> predicate_columns;
+  std::vector<base_statement*> projections_columns; 
 
   size_t when_then_count;
 
-  actionQ(): inMainArg(0),from_clause("##"),column_prefix("##"),table_alias("##"),when_then_count(0){}//TODO remove when_then_count
+  actionQ(): inMainArg(0),from_clause("##"),column_prefix("##"),table_alias("##"),projection_or_predicate_state(true),when_then_count(0){}//TODO remove when_then_count
 
   std::map<const void*,std::vector<const char*> *> x_map;
 
@@ -483,7 +488,6 @@ public:
 
       if (!info.full)
       {
-        std::cout << "failure -->" << query_parse_position << "<---" << std::endl;
         error_description = std::string("failure -->") + query_parse_position + std::string("<---");
         return -1;
       }
@@ -492,7 +496,6 @@ public:
     }
     catch (base_s3select_exception& e)
     {
-      std::cout << e.what() << std::endl;
       error_description.assign(e.what());
       if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL) //abort query execution
       {
@@ -1755,7 +1758,7 @@ public:
     bool quote_fields_asneeded;
     bool redundant_column;
 
-    csv_defintions():row_delimiter('\n'), column_delimiter(','), output_row_delimiter('\n'), output_column_delimiter(','), escape_char('\\'), output_escape_char('\\'), output_quot_char('"'), quot_char('"'), use_header_info(false), ignore_header_info(false), quote_fields_always(false), quote_fields_asneeded(false), redundant_column(true) {}
+    csv_defintions():row_delimiter('\n'), column_delimiter(','), output_row_delimiter('\n'), output_column_delimiter(','), escape_char('\\'), output_escape_char('\\'), output_quot_char('"'), quot_char('"'), use_header_info(false), ignore_header_info(false), quote_fields_always(false), quote_fields_asneeded(false), redundant_column(false) {}
 
   } m_csv_defintion;
 
@@ -1872,6 +1875,17 @@ public:
     m_aggr_flow = m_s3_select->is_aggregate_query();
   }
 
+  void set_csv_query(s3select* s3_query,struct csv_defintions csv)
+  {
+    if(m_s3_select != nullptr) 
+    {
+      return;
+    }
+
+    set(s3_query);
+    m_csv_defintion = csv;
+    csv_parser.set(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char);
+  }
 
   std::string get_error_description()
   {
@@ -2128,7 +2142,6 @@ public:
       }
       catch (base_s3select_exception& e)
       {
-        std::cout << e.what() << std::endl;
         m_error_description = e.what();
         m_error_count ++;
         if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count>100 || (m_stream>=m_end_stream))//abort query execution
@@ -2149,6 +2162,329 @@ public:
   }
 };
 
-};//namespace
+#ifdef _ARROW_EXIST
+class parquet_object : public base_s3object
+{
+
+private:
+  base_statement *m_where_clause;
+  std::vector<base_statement *> m_projections;
+  bool m_aggr_flow = false; //TODO once per query
+  bool m_is_to_aggregate;
+  std::string m_error_description;
+  s3select *m_s3_select;
+  size_t m_error_count;
+  parquet_file_parser* object_reader;
+  parquet_file_parser::column_pos_t m_where_clause_columns;
+  parquet_file_parser::column_pos_t m_projections_columns;
+  std::vector<parquet_file_parser::parquet_value_t> m_predicate_values;
+  std::vector<parquet_file_parser::parquet_value_t> m_projections_values;
+
+public:
+
+  void result_values_to_string(multi_values& projections_resuls, std::string& result)
+  {
+    size_t i = 0;
+
+    for(auto res : projections_resuls.values)
+    {
+      std::ostringstream quoted_result;
+      //quoted_result << std::quoted(res->to_string(),'"','\\');
+      quoted_result << res->to_string();
+      if(++i < projections_resuls.values.size()) {
+      quoted_result << ',';//TODO to use output serialization?
+      }
+      result.append(quoted_result.str());
+    }
+  }
+
+  parquet_object(std::string parquet_file_name, s3select *s3_query,s3selectEngine::rgw_s3select_api* rgw) : base_s3object(s3_query->get_scratch_area()),object_reader(nullptr)
+  {
+    try{
+    
+      object_reader = new parquet_file_parser(parquet_file_name,rgw); //TODO uniq ptr
+    } catch(std::exception &e)
+    { 
+      throw base_s3select_exception(std::string("failure while processing parquet meta-data ") + std::string(e.what()) ,base_s3select_exception::s3select_exp_en_t::FATAL);
+    }
+
+    set(s3_query);
+    
+    s3_query->get_scratch_area()->set_parquet_type();
+
+    load_meta_data_into_scratch_area();
+
+    for(auto x : m_s3_select->get_projections_list())
+    {
+        x->extract_columns(m_projections_columns,object_reader->get_num_of_columns());
+    }
+
+    if(m_s3_select->get_filter())
+        m_s3_select->get_filter()->extract_columns(m_where_clause_columns,object_reader->get_num_of_columns());
+  }
+
+  parquet_object() : base_s3object(nullptr),m_s3_select(nullptr),object_reader(nullptr)
+  {}
+
+  ~parquet_object()
+  {
+    if(object_reader != nullptr)
+    {
+      delete object_reader;
+    }
+
+  }
+
+  std::string get_error_description()
+  {
+    return m_error_description;
+  }
+
+  bool is_set()
+  {
+    return m_s3_select != nullptr; 
+  }
+
+  void set_parquet_object(std::string parquet_file_name, s3select *s3_query,s3selectEngine::rgw_s3select_api* rgw) //TODO duplicate code
+  {
+    try{
+    
+      object_reader = new parquet_file_parser(parquet_file_name,rgw); //TODO uniq ptr
+    } catch(std::exception &e)
+    { 
+      throw base_s3select_exception(std::string("failure while processing parquet meta-data ") + std::string(e.what()) ,base_s3select_exception::s3select_exp_en_t::FATAL);
+    }
+
+    set(s3_query);
+
+    m_sa = s3_query->get_scratch_area();
+    
+    s3_query->get_scratch_area()->set_parquet_type();
+
+    load_meta_data_into_scratch_area();
+
+    for(auto x : m_s3_select->get_projections_list())
+    {
+        x->extract_columns(m_projections_columns,object_reader->get_num_of_columns());
+    }
+
+    if(m_s3_select->get_filter())
+        m_s3_select->get_filter()->extract_columns(m_where_clause_columns,object_reader->get_num_of_columns());
+  }
+  
+
+  int run_s3select_on_object(std::string &result,
+        std::function<int(std::string&)> fp_s3select_result_format,
+        std::function<int(std::string&)> fp_s3select_header_format)
+  {
+    int status = 0;
+
+    do
+    {
+      try
+      {
+        status = getMatchRow(result);
+      }
+      catch (base_s3select_exception &e)
+      {
+        m_error_description = e.what();
+        m_error_count++;
+        if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL || m_error_count > 100) //abort query execution
+        {
+          return -1;
+        }
+      }
+      catch (std::exception &e)
+      {
+        m_error_description = e.what();
+        m_error_count++;
+        if (m_error_count > 100) //abort query execution
+        {
+          return -1;
+        }
+      }
+
+#define S3SELECT_RESPONSE_SIZE_LIMIT (4 * 1024 * 1024)
+      if (result.size() > S3SELECT_RESPONSE_SIZE_LIMIT)
+      {//AWS-cli limits response size the following callbacks send response upon some threshold
+        fp_s3select_result_format(result);
+
+        if (!is_end_of_stream())
+        {
+          fp_s3select_header_format(result);
+        }
+      }
+      else
+      {
+        if (is_end_of_stream())
+        {
+          fp_s3select_result_format(result);
+        }
+      }
+
+      if (status < 0 || is_end_of_stream())
+      {
+        break;
+      }
+
+    } while (1);
+
+    return status;
+  }
+
+  void load_meta_data_into_scratch_area()
+  {
+    int i=0;
+    for(auto x : object_reader->get_schema())
+    {
+      m_s3_select->get_scratch_area()->set_column_pos(x.first.c_str(),i++); 
+    }
+  }
+
+  void set(s3select* s3_query) //TODO reuse code on base
+  {
+    m_s3_select = s3_query;
+    base_s3object::set(m_s3_select->get_scratch_area());
+
+    m_projections = m_s3_select->get_projections_list();
+    m_where_clause = m_s3_select->get_filter();
+
+    if (m_where_clause)
+    {
+      m_where_clause->traverse_and_apply(m_sa, m_s3_select->get_aliases());
+    }
+
+    for (auto p : m_projections)
+    {
+      p->traverse_and_apply(m_sa, m_s3_select->get_aliases());
+    }
+
+    m_aggr_flow = m_s3_select->is_aggregate_query();
+  }
+
+  bool is_end_of_stream()
+  {
+    return object_reader->end_of_stream();
+  }
+
+  int getMatchRow(std::string &result) //TODO virtual ? getResult
+  {
+
+    // get all column-references from where-clause
+    // call parquet-reader(predicate-column-positions ,&row-values)
+    // update scrach area with row-values
+    // run where (if exist) in-case its true --> parquet-reader(projections-column-positions ,&row-values)
+
+    bool next_rownum_status = true;
+    multi_values projections_resuls;
+
+    if (m_aggr_flow == true)
+    {
+      do
+      {
+        if (is_end_of_stream())
+        {
+          if (true) //(m_is_to_aggregate)
+          {
+            for (auto i : m_projections)
+            {
+              i->set_last_call();
+              i->set_skip_non_aggregate(false);//projection column is set to be runnable
+              projections_resuls.push_value( &(i->eval()) );
+            }
+	    result_values_to_string(projections_resuls,result);
+          }
+
+          return 0;
+        }
+
+        if ((*m_projections.begin())->is_set_last_call())
+        {
+          //should validate while query execution , no update upon nodes are marked with set_last_call
+          throw base_s3select_exception("on aggregation query , can not stream row data post do-aggregate call", base_s3select_exception::s3select_exp_en_t::FATAL);
+        }
+
+        //TODO if (m_where_clause)
+        object_reader->get_column_values_by_positions(m_where_clause_columns, m_predicate_values); //TODO status should indicate error/end-of-stream/success
+
+        m_sa->update(m_predicate_values, m_where_clause_columns);
+
+        for (auto a : *m_s3_select->get_aliases()->get())
+        {
+          a.second->invalidate_cache_result();
+        }
+
+        if (!m_where_clause || m_where_clause->eval().is_true())
+        {
+          object_reader->get_column_values_by_positions(m_projections_columns, m_projections_values);
+          m_sa->update(m_projections_values, m_projections_columns);
+          for (auto i : m_projections)
+          {
+            i->eval();
+          }
+        }
+
+        object_reader->increase_rownum();
+
+      } while (1);
+    }
+    else
+    {
+      if (m_where_clause)
+      {
+        do
+        {
+
+          for (auto a : *m_s3_select->get_aliases()->get())
+          {
+            a.second->invalidate_cache_result();
+          }
+
+          object_reader->get_column_values_by_positions(m_where_clause_columns, m_predicate_values); //TODO status should indicate error/end-of-stream/success
+
+          m_sa->update(m_predicate_values, m_where_clause_columns);
+
+          if (m_where_clause->eval().is_true())
+            break;
+          else
+            next_rownum_status = object_reader->increase_rownum();
+
+        } while (next_rownum_status);
+
+        if (next_rownum_status == false)
+          return 1;
+      }
+      else
+      {
+        for (auto a : *m_s3_select->get_aliases()->get())
+        {
+          a.second->invalidate_cache_result();
+        }
+      }
+
+      object_reader->get_column_values_by_positions(m_projections_columns, m_projections_values);
+      m_sa->update(m_projections_values, m_projections_columns);
+
+      for (auto i : m_projections)
+      {
+	projections_resuls.push_value( &(i->eval()) );
+      }
+      result_values_to_string(projections_resuls,result);
+      result.append("\n");//TODO not generic 
+
+      object_reader->increase_rownum();
+
+      if (is_end_of_stream())
+      {
+        return 0;
+      }
+    }
+
+    return 1; //1>0
+  }
+};
+#endif //_ARROW_EXIST
+
+}; // namespace s3selectEngine
 
 #endif
