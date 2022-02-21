@@ -216,7 +216,7 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file, s
     return -1;
   }
 
-  FILE *fp;
+  FILE *fp=nullptr;
 
   fp=fopen(input_file,"r");
 
@@ -260,6 +260,9 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file, s
     {
       if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL) //abort query execution
       {
+	if(fp){
+	  fclose(fp);
+	}
         return -1;
       }
     }
@@ -269,6 +272,9 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file, s
 
   } while (0);
 
+  if(fp){
+    fclose(fp);
+  }
   return 0;
 }// ============================================================ //
 #else
@@ -551,11 +557,11 @@ std::string run_s3select(std::string expression,std::string input)
       f.seekg(0);
       f.read(buffer.data(), buffer.size());
 
-      std::string fn = std::string("./parquet_copy") + std::to_string(file_no);      
+      std::string fn = std::string("./failed_test_input_") + std::to_string(file_no) + std::string(".parquet");      
       std::ofstream fw(fn.c_str());
       fw.write(buffer.data(), buffer.size());
 
-      fn = std::string("./csv_copy") + std::to_string(file_no++);      
+      fn = std::string("./failed_test_input_") + std::to_string(file_no++) + std::string(".csv");
       std::ofstream fw2(fn.c_str());
       fw2.write(parquet_input.data(), parquet_input.size());
       
