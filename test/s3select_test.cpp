@@ -414,10 +414,10 @@ std::string string_to_quot(std::string& s, char quot = '"')
   return result;
 }
 
-void parquet_csv_report_error(std::string a, std::string b)
+void parquet_csv_report_error(std::string parquet_result, std::string csv_result)
 {
 #ifdef _ARROW_EXIST
-  ASSERT_EQ(a,b);
+  ASSERT_EQ(parquet_result,csv_result);
 #else
   ASSERT_EQ(0,0);
 #endif
@@ -540,6 +540,7 @@ std::string run_s3select(std::string expression,std::string input)
   if (strcmp(parquet_result.c_str(),s3select_result.c_str()))
   {
     std::cout << "failed on query " << expression << std::endl;
+    std::cout << "input for query reside on" << "./failed_test_input" << std::to_string(file_no) << ".[csv|parquet]" << std::endl;
 
     {
       std::string buffer;

@@ -2198,7 +2198,7 @@ public:
     }
   }
 
-  parquet_object(std::string parquet_file_name, s3select *s3_query,s3selectEngine::rgw_s3select_api* rgw) : base_s3object(s3_query->get_scratch_area()),object_reader(nullptr)
+  parquet_object(std::string parquet_file_name, s3select *s3_query,s3selectEngine::rgw_s3select_api* rgw) : base_s3object(s3_query->get_scratch_area()),m_error_count(0),object_reader(nullptr)
   {
     try{
     
