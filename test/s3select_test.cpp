@@ -216,7 +216,7 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file, s
     return -1;
   }
 
-  FILE *fp;
+  FILE *fp=nullptr;
 
   fp=fopen(input_file,"r");
 
@@ -260,6 +260,9 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file, s
     {
       if (e.severity() == base_s3select_exception::s3select_exp_en_t::FATAL) //abort query execution
       {
+	if(fp){
+	  fclose(fp);
+	}
         return -1;
       }
     }
@@ -269,6 +272,9 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file, s
 
   } while (0);
 
+  if(fp){
+    fclose(fp);
+  }
   return 0;
 }// ============================================================ //
 #else
@@ -414,10 +420,10 @@ std::string string_to_quot(std::string& s, char quot = '"')
   return result;
 }
 
-void parquet_csv_report_error(std::string a, std::string b)
+void parquet_csv_report_error(std::string parquet_result, std::string csv_result)
 {
 #ifdef _ARROW_EXIST
-  ASSERT_EQ(a,b);
+  ASSERT_EQ(parquet_result,csv_result);
 #else
   ASSERT_EQ(0,0);
 #endif
@@ -540,6 +546,7 @@ std::string run_s3select(std::string expression,std::string input)
   if (strcmp(parquet_result.c_str(),s3select_result.c_str()))
   {
     std::cout << "failed on query " << expression << std::endl;
+    std::cout << "input for query reside on" << "./failed_test_input" << std::to_string(file_no) << ".[csv|parquet]" << std::endl;
 
     {
       std::string buffer;
@@ -550,11 +557,11 @@ std::string run_s3select(std::string expression,std::string input)
       f.seekg(0);
       f.read(buffer.data(), buffer.size());
 
-      std::string fn = std::string("./parquet_copy") + std::to_string(file_no);      
+      std::string fn = std::string("./failed_test_input_") + std::to_string(file_no) + std::string(".parquet");      
       std::ofstream fw(fn.c_str());
       fw.write(buffer.data(), buffer.size());
 
-      fn = std::string("./csv_copy") + std::to_string(file_no++);      
+      fn = std::string("./failed_test_input_") + std::to_string(file_no++) + std::string(".csv");
       std::ofstream fw2(fn.c_str());
       fw2.write(parquet_input.data(), parquet_input.size());
       

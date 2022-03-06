@@ -1487,6 +1487,7 @@ public:
 
   enum class parquet_type
   {
+    NA_TYPE,
     STRING,
     INT32,
     INT64,
@@ -1495,14 +1496,18 @@ public:
     PARQUET_NULL
   };
 
-  typedef struct
+  struct parquet_value
   {
     int64_t num;
     char *str; //str is pointing to offset in string which is NOT null terminated.
     uint16_t str_len;
     double dbl;
     parquet_type type;
-  } parquet_value_t;
+
+    parquet_value():type(parquet_type::NA_TYPE){}
+  };
+
+  typedef struct parquet_value parquet_value_t;
 
   private:
   parquet_value_t m_last_value;

@@ -26,6 +26,4 @@ enable_testing()
 add_subdirectory(example)
 add_subdirectory(test)
 
-add_test(NAME run_my_test 
-       COMMAND sh -c "../example/run_test.bash")
 
