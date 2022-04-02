@@ -1509,6 +1509,8 @@ public:
 
   typedef struct parquet_value parquet_value_t;
 
+  enum class parquet_column_read_state {PARQUET_OUT_OF_RANGE,PARQUET_READ_OK};
+
   private:
   parquet_value_t m_last_value;
 
@@ -1524,7 +1526,7 @@ public:
 
   int64_t Skip(int64_t rows_to_skip);
 
-  int Read(uint64_t rownum,parquet_value_t & value);
+  parquet_column_read_state Read(uint64_t rownum,parquet_value_t & value);
 
 };
 
@@ -1628,7 +1630,7 @@ private:
   bool end_of_stream()
   {
 
-    if (m_rownum >= m_num_of_rows)
+    if (m_rownum > (m_num_of_rows-1))
       return true;
     return false;
   }
@@ -1636,6 +1638,11 @@ private:
   uint64_t get_number_of_rows()
   {
     return m_num_of_rows;
+  }
+
+  uint64_t rownum()
+  {
+    return m_rownum;
   }
 
   bool increase_rownum()
@@ -1669,7 +1676,8 @@ private:
         //TODO throw exception
         return -1;
       }
-      m_column_readers[col]->Read(m_rownum,column_value);
+      auto status = m_column_readers[col]->Read(m_rownum,column_value);
+      if(status == column_reader_wrap::parquet_column_read_state::PARQUET_OUT_OF_RANGE) return -1;
       row_values.push_back(column_value);//TODO intensive (should move)
     }
     return 0;
@@ -1908,7 +1916,8 @@ private:
     return rows_read;
   }
 
-  int column_reader_wrap::Read(const uint64_t rownum,parquet_value_t & value)
+
+  column_reader_wrap::parquet_column_read_state column_reader_wrap::Read(const uint64_t rownum,parquet_value_t & value)
   {
     int64_t values_read = 0;
 
@@ -1929,7 +1938,7 @@ private:
           if ((m_row_grouop_id + 1) >= m_parquet_reader->metadata()->num_row_groups())
           {
             m_end_of_stream = true;
-            return -2; //end-of-stream
+            return column_reader_wrap::parquet_column_read_state::PARQUET_OUT_OF_RANGE;//end-of-stream
           }
           else
           {
@@ -1957,7 +1966,7 @@ private:
       value = m_last_value;
     }
 
-    return 0;
+    return column_reader_wrap::parquet_column_read_state::PARQUET_READ_OK;
   }
 
 #endif
