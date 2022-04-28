@@ -416,10 +416,10 @@ public:
 
 private:
   value_t __val;
-  //std::string m_to_string;
-  std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_to_string;
-  //std::string m_str_value;
-  std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_str_value;
+  std::string m_to_string;
+  //std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_to_string;
+  std::string m_str_value;
+  //std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_str_value;
 
 public:
   enum class value_En_t
@@ -602,6 +602,20 @@ public:
     return  m_to_string.c_str();
   }
 
+  value(const value& o)
+  {
+    if(o.type == value_En_t::STRING)
+    {
+      m_str_value = o.m_str_value;
+      __val.str = m_str_value.data();
+    }
+    else
+    {
+      this->__val = o.__val;
+    }
+
+    this->type = o.type;
+  }
 
   value& operator=(value& o)
   {
@@ -1366,7 +1380,7 @@ private:
   value var_value;
   std::string m_star_op_result;
   char m_star_op_result_charc[4096]; //TODO cause larger allocations for other objects containing variable (dynamic is one solution)
-  value star_operation_values[16];//TODO cause larger allocations for other objects containing variable (dynamic is one solution)
+  std::vector<value> star_operation_values;
 
   const int undefined_column_pos = -1;
   const int column_alias = -2;
@@ -1510,17 +1524,11 @@ public:
 
   value& star_operation()   //purpose return content of all columns in a input stream
   {
-
-    
     size_t pos=0;
     size_t num_of_columns = m_scratch->get_num_of_columns();
     var_value.multiple_values.clear(); //TODO var_value.clear()??
 
-    if(sizeof(star_operation_values)/sizeof(value) < num_of_columns)
-    {
-        throw base_s3select_exception(std::string("not enough memory for star-operation"), base_s3select_exception::s3select_exp_en_t::FATAL);
-    }
-
+    star_operation_values.reserve(num_of_columns);
     for(size_t i=0; i<num_of_columns; i++)
     {
       size_t len = m_scratch->get_column_value(i).size();
@@ -1532,12 +1540,12 @@ public:
       memcpy(&m_star_op_result_charc[pos], m_scratch->get_column_value(i).data(), len);//TODO using string_view will avoid copy
       m_star_op_result_charc[ pos + len ] = 0;
 
-      star_operation_values[i] = &m_star_op_result_charc[pos];//set string value
-      var_value.multiple_values.push_value( &star_operation_values[i] );
+      value v1(m_star_op_result_charc+pos);
+      star_operation_values.push_back(v1);
+      var_value.multiple_values.push_value( &star_operation_values.back() );
 
       pos += len;
       pos ++;
-
     }
 
     var_value.type = value::value_En_t::MULTIPLE_VALUES;
