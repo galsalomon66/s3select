@@ -780,6 +780,11 @@ void test_single_column_single_row(const char* input_query,const char* expected_
 	ASSERT_TRUE(true);
 	return; 
     }
+    else if (status != 0)
+    {
+	EXPECT_TRUE(false) << "fail to parse query: " << input_query;
+	return;
+    }
 
     s3selectEngine::csv_object s3_csv_object(&s3select_syntax);
     std::string s3select_result;
@@ -2626,6 +2631,199 @@ TEST(TestS3selectFunctions, presto_syntax_alignments)
   auto s3select_presto_res = run_s3select(input_presto_query, input_for_presto);
 
   ASSERT_EQ(s3select_res, s3select_presto_res);
+
+}
+
+
+// JSON tests
+
+TEST(TestS3selectFunctions, json_queries)
+{
+  std::string json_input=R"(
+{
+"firstName": "Joe",
+"lastName": "Jackson",
+"gender": "male",
+"age": "twenty",
+"address": {
+"streetAddress": "101",
+"city": "San Diego",
+"state": "CA"
+},
+
+"firstName": "Joe_2",
+"lastName": "Jackson_2",
+"gender": "male",
+"age": 21,
+"address": {
+"streetAddress": "101",
+"city": "San Diego",
+"state": "CA"
+},
+
+"phoneNumbers": [
+{ "type": "home1", "number": "734928_1","addr": 11 },
+{ "type": "home2", "number": "734928_2","addr": 22 },
+{ "type": "home3", "number": "734928_3","addr": 33 },
+{ "type": "home4", "number": "734928_4","addr": 44 },
+{ "type": "home5", "number": "734928_5","addr": 55 },
+{ "type": "home6", "number": "734928_6","addr": 66 },
+{ "type": "home7", "number": "734928_7","addr": 77 },
+{ "type": "home8", "number": "734928_8","addr": 88 },
+{ "type": "home9", "number": "734928_9","addr": 99 },
+{ "type": "home10", "number": "734928_10","addr": 100 }
+],
+
+"key_after_array": "XXX"
+
+}
+)";
+
+  //count JSON structure, from-clause is empty.
+  std::string result;
+  const char* input_query = "select count(0) from s3object[*];";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,"1");
+
+  //count JSON structure, from-clause points an array of objects.
+  input_query = "select count(0) from s3object[*].phoneNumbers;";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,"10");
+
+  //select specific key in array, from-clause points an array of objects.
+  std::string expected_result=R"(11
+22
+33
+44
+55
+66
+77
+88
+99
+100
+)";
+  input_query = "select _1.addr from s3object[*].phoneNumbers;";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,expected_result);
+
+  //select specific keys in array, operation on fetched value, from-clause is empty.
+  expected_result=R"(Joe_2,XXX,25
+)";
+  input_query = "select _1.firstname,_1.key_after_array,_1.age+4 from s3object[*];";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(null,null,null
+null,null,null
+null,null,null
+null,null,null
+null,null,null
+null,null,null
+null,null,null
+null,null,null
+null,null,null
+null,null,null
+)";
+  //select non-exists keys, from-clause points on array.
+  input_query = "select _1.firstname,_1.key_after_array,_1.age+4 from s3object[*].phonenumbers;";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(7349280
+)";
+
+  //select key, operation on value, with predicate(where-clause), from-clause points on array.
+  input_query = "select cast(substring(_1.number,1,6) as int) *10 from s3object[*].phonenumbers where _1.type='home2';";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(firstName. : Joe
+lastName. : Jackson
+gender. : male
+age. : twenty
+address.streetAddress. : 101
+address.city. : San Diego
+address.state. : CA
+firstName. : Joe_2
+lastName. : Jackson_2
+gender. : male
+age. : 21
+address.streetAddress. : 101
+address.city. : San Diego
+address.state. : CA
+phoneNumbers.type. : home1
+phoneNumbers.number. : 734928_1
+phoneNumbers.addr. : 11
+phoneNumbers.type. : home2
+phoneNumbers.number. : 734928_2
+phoneNumbers.addr. : 22
+phoneNumbers.type. : home3
+phoneNumbers.number. : 734928_3
+phoneNumbers.addr. : 33
+phoneNumbers.type. : home4
+phoneNumbers.number. : 734928_4
+phoneNumbers.addr. : 44
+phoneNumbers.type. : home5
+phoneNumbers.number. : 734928_5
+phoneNumbers.addr. : 55
+phoneNumbers.type. : home6
+phoneNumbers.number. : 734928_6
+phoneNumbers.addr. : 66
+phoneNumbers.type. : home7
+phoneNumbers.number. : 734928_7
+phoneNumbers.addr. : 77
+phoneNumbers.type. : home8
+phoneNumbers.number. : 734928_8
+phoneNumbers.addr. : 88
+phoneNumbers.type. : home9
+phoneNumbers.number. : 734928_9
+phoneNumbers.addr. : 99
+phoneNumbers.type. : home10
+phoneNumbers.number. : 734928_10
+phoneNumbers.addr. : 100
+key_after_array. : XXX
+#=== 0 ===#
+)";
+
+  // star-operation on object, empty from-clause
+  input_query = "select * from s3object[*];";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(phoneNumbers.type. : home2
+phoneNumbers.number. : 734928_2
+phoneNumbers.addr. : 22
+#=== 0 ===#
+phoneNumbers.type. : home3
+phoneNumbers.number. : 734928_3
+phoneNumbers.addr. : 33
+#=== 1 ===#
+phoneNumbers.type. : home4
+phoneNumbers.number. : 734928_4
+phoneNumbers.addr. : 44
+#=== 2 ===#
+phoneNumbers.type. : home5
+phoneNumbers.number. : 734928_5
+phoneNumbers.addr. : 55
+#=== 3 ===#
+phoneNumbers.type. : home6
+phoneNumbers.number. : 734928_6
+phoneNumbers.addr. : 66
+#=== 4 ===#
+phoneNumbers.type. : home7
+phoneNumbers.number. : 734928_7
+phoneNumbers.addr. : 77
+#=== 5 ===#
+phoneNumbers.type. : home8
+phoneNumbers.number. : 734928_8
+phoneNumbers.addr. : 88
+#=== 6 ===#
+)";
+
+  // star-operation on object, from-clause points on array, with where-clause
+  input_query = "select * from s3object[*].phonenumbers where _1.addr between 20 and 89;";
+  run_json_query(input_query, json_input,result);
+  ASSERT_EQ(result,expected_result);
 
 }
 

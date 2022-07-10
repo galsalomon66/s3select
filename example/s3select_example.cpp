@@ -348,7 +348,56 @@ int run_query_on_parquet_file(const char* input_query, const char* input_file)
 }
 #endif //_ARROW_EXIST
 
-int run_on_localFile(char*  input_query)
+#define BUFFER_SIZE (4*1024*1024)
+int process_json_query(const char* input_query,const char* fname)
+{//purpose: process json query 
+
+  s3select s3select_syntax;
+  int status = s3select_syntax.parse_query(input_query);
+  if (status != 0)
+  {
+    std::cout << "failed to parse query " << s3select_syntax.get_error_description() << std::endl;
+    return -1;
+  }
+
+  std::ifstream input_file_stream;
+  try {
+  	input_file_stream = std::ifstream(fname, std::ios::in | std::ios::binary);
+  }
+  catch( ... )
+  {
+	std::cout << "failed to open file " << fname << std::endl;	
+	exit(-1);
+  }
+
+  auto object_sz = boost::filesystem::file_size(fname);
+  json_object json_query_processor(&s3select_syntax);
+  std::string buff(BUFFER_SIZE,0);
+  std::string result;
+
+  size_t read_sz = input_file_stream.readsome(buff.data(),BUFFER_SIZE);
+
+  while(read_sz)
+  {
+    std::cout << "read next chunk " << read_sz << std::endl;
+
+    status = json_query_processor.run_s3select_on_stream(result, buff.data(), read_sz, object_sz);
+    std::cout << result << std::endl;
+ 
+    if(status<0)
+    {
+      std::cout << "failure upon processing " << std::endl;
+      return -1;
+    } 
+    read_sz = input_file_stream.readsome(buff.data(),BUFFER_SIZE);  
+  }
+  json_query_processor.run_s3select_on_stream(result, 0, 0, object_sz);
+  std::cout << result << std::endl;
+
+  return 0;
+}
+
+int run_on_localFile(char* input_query)
 {
 
   //purpose: demostrate the s3select functionalities
@@ -497,10 +546,22 @@ int run_on_single_query(const char* fname, const char* query)
     return status;
   }
 
-  int status;
+  s3select query_ast;
+  auto status = query_ast.parse_query(query); 
+  if(status<0)	
+  {
+    std::cout << "failed to parse query : " << query_ast.get_error_description() << std::endl;
+    return -1;
+  }
+   
+  if(query_ast.is_json_query())
+  {
+    return process_json_query(query,fname);
+  } 
+
+
   auto file_sz = boost::filesystem::file_size(fname);
 
-#define BUFFER_SIZE (4*1024*1024)
   std::string buff(BUFFER_SIZE,0);
   while (1)
   {

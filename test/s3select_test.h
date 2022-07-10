@@ -573,3 +573,23 @@ std::string run_s3select(std::string expression,std::string input)
 
   return s3select_result;
 }
+
+// JSON tests API's
+int run_json_query(const char* json_query, std::string& json_input,std::string& result)
+{//purpose: run single-chunk json queries
+
+  s3select s3select_syntax;
+  int status = s3select_syntax.parse_query(json_query);
+  if (status != 0)
+  {
+    std::cout << "failed to parse query " << s3select_syntax.get_error_description() << std::endl;
+    return -1;
+  }
+
+  json_object json_query_processor(&s3select_syntax);
+  status = json_query_processor.run_s3select_on_stream(result, json_input.data(), json_input.size(), json_input.size());
+  status = json_query_processor.run_s3select_on_stream(result, 0, 0, json_input.size());
+
+  return status;
+}
+

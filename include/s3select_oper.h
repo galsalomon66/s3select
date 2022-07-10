@@ -117,7 +117,7 @@ class base_statement;
 //ChunkAllocator, prevent allocation from heap.
 typedef std::vector<base_statement*, ChunkAllocator<base_statement*, 256> > bs_stmt_vec_t;
 
-class base_s3select_exception
+class base_s3select_exception : public std::exception
 {
 
 public:
@@ -421,12 +421,15 @@ public:
     char* str;//TODO consider string_view(save copy)
     double dbl;
     timestamp_t* timestamp;
+    bool b;
   } value_t;
 
   multi_values multiple_values;
 
 private:
   value_t __val;
+  //JSON query has a unique structure, the variable-name reside on input. there are cases were it should be extracted.
+  std::vector<std::string> m_json_key;
   std::string m_to_string;
   //std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_to_string;
   std::string m_str_value;
@@ -549,6 +552,13 @@ public:
     type = value_En_t::S3NULL;
   }
 
+  value_En_t _type() const { return type; }
+
+  void set_json_key_path(std::vector<std::string>& key_path)
+  {
+    m_json_key = key_path;
+  }
+
   const char* to_string()  //TODO very intensive , must improve this
   {
 
@@ -610,6 +620,20 @@ public:
       m_to_string.assign( __val.str );
     }
 
+    if(m_json_key.size())
+    {
+      std::string key_path;
+      for(auto& p : m_json_key)
+      {//TODO upon star-operation key-path assignment is very intensive
+	key_path.append(p);
+	key_path.append(".");
+      }
+
+      key_path.append(" : ");
+      key_path.append(m_to_string);
+      m_to_string = key_path;
+    }
+
     return  m_to_string.c_str();
   }
 
@@ -624,6 +648,8 @@ public:
     {
       this->__val = o.__val;
     }
+
+    this->m_json_key = o.m_json_key;
 
     this->type = o.type;
   }
@@ -642,6 +668,8 @@ public:
 
     this->type = o.type;
 
+    this->m_json_key = o.m_json_key;
+
     return *this;
   }
 
@@ -655,6 +683,30 @@ public:
   }
 
   value& operator=(int64_t i)
+  {
+    this->__val.num = i;
+    this->type = value_En_t::DECIMAL;
+
+    return *this;
+  }
+
+  value& operator=(int i)
+  {
+    this->__val.num = i;
+    this->type = value_En_t::DECIMAL;
+
+    return *this;
+  }
+
+  value& operator=(unsigned i)
+  {
+    this->__val.num = i;
+    this->type = value_En_t::DECIMAL;
+
+    return *this;
+  }
+
+  value& operator=(uint64_t i)
   {
     this->__val.num = i;
     this->type = value_En_t::DECIMAL;
@@ -699,6 +751,11 @@ public:
   double dbl()
   {
     return __val.dbl;
+  }
+
+  bool bl()
+  {
+    return __val.b;
   }
 
   timestamp_t* timestamp() const
@@ -1024,10 +1081,16 @@ private:
   bool parquet_type;
   char str_buff[4096];
   uint16_t buff_loc;
+
+
 public:
 
+  typedef std::pair<std::vector<std::string>,value> json_key_value_t;
+  typedef std::vector< json_key_value_t > json_star_op_cont_t;
+  json_star_op_cont_t m_json_star_operation;
+
   scratch_area():m_upper_bound(-1),parquet_type(false),buff_loc(0)
-  {
+  {//TODO it should resize dynamicly
     m_schema_values = new std::vector<value>(128,value(""));
   }
 
@@ -1035,6 +1098,17 @@ public:
   {
     delete m_schema_values;
   }
+
+  json_star_op_cont_t* get_star_operation_cont()
+  {
+    return &m_json_star_operation;
+  }
+ 
+  void clear_data()
+  {
+    m_json_star_operation.clear();
+    (*m_schema_values).clear();
+  } 
 
   void set_column_pos(const char* n, int pos)//TODO use std::string
   {
@@ -1125,6 +1199,12 @@ public:
     buff_loc=0;
   }
 
+  int update_json_varible(value v,int json_idx)
+  {
+    (*m_schema_values)[ json_idx ] = v;
+    return 0;
+  }
+
 #ifdef _ARROW_EXIST
   int update(std::vector<parquet_file_parser::parquet_value_t> &parquet_row_value, parquet_file_parser::column_pos_t &column_positions)
   {
@@ -1196,10 +1276,12 @@ protected:
   int m_eval_stack_depth;
   bool m_skip_non_aggregate_op;
   value value_na;
+  //JSON queries has different syntax from other data-sources(Parquet,CSV)
+  bool m_json_statement;
 
 public:
   base_statement():m_scratch(nullptr), is_last_call(false), m_is_cache_result(false),
-  m_projection_alias(nullptr), m_eval_stack_depth(0), m_skip_non_aggregate_op(false) {}
+  m_projection_alias(nullptr), m_eval_stack_depth(0), m_skip_non_aggregate_op(false),m_json_statement(false) {}
 
   virtual value& eval()
   {
@@ -1226,8 +1308,6 @@ public:
 
   virtual value& eval_internal() = 0;
   
-  bool parquet_type; //TODO enum switch (csv,json,parquet,other)
-
 public:
   virtual base_statement* left() const
   {
@@ -1240,17 +1320,19 @@ public:
   virtual std::string print(int ident) =0;//TODO complete it, one option to use level parametr in interface ,
   virtual bool semantic() =0;//done once , post syntax , traverse all nodes and validate semantics.
 
-  virtual void traverse_and_apply(scratch_area* sa, projection_alias* pa)
+  virtual void traverse_and_apply(scratch_area* sa, projection_alias* pa,bool json_statement)
   {
     m_scratch = sa;
     m_aliases = pa;
+    m_json_statement = json_statement;
+
     if (left())
     {
-      left()->traverse_and_apply(m_scratch, m_aliases);
+      left()->traverse_and_apply(m_scratch, m_aliases, json_statement);
     }
     if (right())
     {
-      right()->traverse_and_apply(m_scratch, m_aliases);
+      right()->traverse_and_apply(m_scratch, m_aliases, json_statement);
     }
   }
 
@@ -1278,6 +1360,11 @@ public:
     return false;
   }
 
+  virtual bool is_star_operation() const
+  {
+    return false;
+  }
+
   virtual void resolve_node()
   {//part of semantic analysis(TODO maybe semantic method should handle this)
     if (left())
@@ -1290,11 +1377,17 @@ public:
     }
   }
 
+  bool is_json_statement()
+  {
+    return m_json_statement;
+  }
+
   bool is_function() const;
   const base_statement* get_aggregate() const;
   bool is_nested_aggregate(bool&) const;
   bool is_column_reference() const;
   bool mark_aggreagtion_subtree_to_execute();
+  bool is_statement_contain_star_operation() const;
 
 #ifdef _ARROW_EXIST
   void extract_columns(parquet_file_parser::column_pos_t &cols,const uint16_t max_columns);
@@ -1377,8 +1470,9 @@ public:
   enum class var_t
   {
     NA,
-    VAR,//schema column (i.e. age , price , ...)
-    COL_VALUE, //concrete value
+    VARIABLE_NAME,//schema column (i.e. age , price , ...)
+    COLUMN_VALUE, //concrete value (string,number,boolean)
+    JSON_VARIABLE,//a key-path reference
     POS, // CSV column number  (i.e. _1 , _2 ... )
     STAR_OPERATION, //'*'
   } ;
@@ -1392,20 +1486,31 @@ private:
   std::string m_star_op_result;
   char m_star_op_result_charc[4096]; //TODO cause larger allocations for other objects containing variable (dynamic is one solution)
   std::vector<value> star_operation_values;
+  int json_variable_idx;
 
   const int undefined_column_pos = -1;
   const int column_alias = -2;
 
 public:
-  variable():m_var_type(var_t::NA), _name(""), column_pos(-1) {}
+  variable():m_var_type(var_t::NA), _name(""), column_pos(-1), json_variable_idx(-1) {}
 
-  explicit variable(int64_t i) : m_var_type(var_t::COL_VALUE), column_pos(-1), var_value(i) {}
+  explicit variable(int64_t i) : m_var_type(var_t::COLUMN_VALUE), column_pos(-1), var_value(i), json_variable_idx(-1) {}
 
-  explicit variable(double d) : m_var_type(var_t::COL_VALUE), _name("#"), column_pos(-1), var_value(d) {}
+  explicit variable(double d) : m_var_type(var_t::COLUMN_VALUE), _name("#"), column_pos(-1), var_value(d), json_variable_idx(-1) {}
 
-  explicit variable(int i) : m_var_type(var_t::COL_VALUE), column_pos(-1), var_value(i) {}
+  explicit variable(int i) : m_var_type(var_t::COLUMN_VALUE), column_pos(-1), var_value(i), json_variable_idx(-1) {}
 
-  explicit variable(const std::string& n) : m_var_type(var_t::VAR), _name(n), column_pos(-1) {}
+  explicit variable(const std::string& n) : m_var_type(var_t::VARIABLE_NAME), _name(n), column_pos(-1), json_variable_idx(-1) {}
+
+  explicit variable(const std::string& n, var_t tp, size_t json_idx) : m_var_type(var_t::NA)
+  {//only upon JSON use case
+    if(tp == variable::var_t::JSON_VARIABLE)
+    {
+      m_var_type = variable::var_t::JSON_VARIABLE;
+      json_variable_idx = static_cast<int>(json_idx);
+      _name = n;//"#"; debug
+    } 
+  }
 
   variable(const std::string& n,  var_t tp) : m_var_type(var_t::NA)
   {
@@ -1416,7 +1521,7 @@ public:
       int pos = atoi( n.c_str() + 1 ); //TODO >0 < (schema definition , semantic analysis)
       column_pos = pos -1;// _1 is the first column ( zero position )
     }
-    else if (tp == variable::var_t::COL_VALUE)
+    else if (tp == variable::var_t::COLUMN_VALUE)
     {
       _name = "#";
       m_var_type = tp;
@@ -1435,25 +1540,25 @@ public:
   {
     if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_NULL)
     {
-      m_var_type = variable::var_t::COL_VALUE;
+      m_var_type = variable::var_t::COLUMN_VALUE;
       column_pos = undefined_column_pos;
       var_value.type = value::value_En_t::S3NULL;//TODO use set_null
     }
     else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_NAN)
     {
-      m_var_type = variable::var_t::COL_VALUE;
+      m_var_type = variable::var_t::COLUMN_VALUE;
       column_pos = undefined_column_pos;
       var_value.set_nan();
     }
     else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_TRUE)
     {
-      m_var_type = variable::var_t::COL_VALUE;
+      m_var_type = variable::var_t::COLUMN_VALUE;
       column_pos = -1;
       var_value.set_true();
     }
     else if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_FALSE)
     {
-      m_var_type = variable::var_t::COL_VALUE;
+      m_var_type = variable::var_t::COLUMN_VALUE;
       column_pos = -1;
       var_value.set_false();
     }
@@ -1505,7 +1610,16 @@ public:
 
   virtual bool is_column() const //is reference to column.
   {
-    if(m_var_type == var_t::VAR || m_var_type == var_t::POS || m_var_type == var_t::STAR_OPERATION)
+    if(m_var_type == var_t::VARIABLE_NAME || m_var_type == var_t::POS || m_var_type == var_t::STAR_OPERATION)
+    {
+      return true;
+    }
+    return false;
+  }
+
+  virtual bool is_star_operation() const
+  {
+    if(m_var_type == var_t::STAR_OPERATION)
     {
       return true;
     }
@@ -1532,9 +1646,11 @@ public:
     return var_value.type;
   }
 
+  value& star_operation()
+  {//purpose return content of all columns in a input stream
+    if(is_json_statement()) 
+	return json_star_operation();
 
-  value& star_operation()   //purpose return content of all columns in a input stream
-  {
     size_t pos=0;
     size_t num_of_columns = m_scratch->get_num_of_columns();
     var_value.multiple_values.clear(); //TODO var_value.clear()??
@@ -1564,15 +1680,34 @@ public:
     return var_value;
   }
 
+  value& json_star_operation()
+  {//purpose: per JSON star-operation it needs to get column-name(full-path) and its value
+
+    var_value.multiple_values.clear(); 
+    for(auto& key_value : *m_scratch->get_star_operation_cont())
+    {
+      key_value.second.set_json_key_path(key_value.first);
+      var_value.multiple_values.push_value(&key_value.second);
+    }
+
+    var_value.type = value::value_En_t::MULTIPLE_VALUES;
+
+    return var_value;
+  }
+
   virtual value& eval_internal()
   {
-    if (m_var_type == var_t::COL_VALUE)
+    if (m_var_type == var_t::COLUMN_VALUE)
     {
       return var_value;  // a literal,could be deciml / float / string
     }
     else if(m_var_type == var_t::STAR_OPERATION)
     {
       return star_operation();
+    }
+    else if(m_var_type == var_t::JSON_VARIABLE && json_variable_idx >= 0)
+    {
+      column_pos = json_variable_idx; //TODO handle column alias
     }
     else if (column_pos == undefined_column_pos)
     {
