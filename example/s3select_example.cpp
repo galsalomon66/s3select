@@ -505,7 +505,7 @@ int run_on_localFile(char* input_query)
       break;
     }
 
-    if(s3select_result.size()>1)
+    if(s3select_result.size()>0)
     {
       std::cout << s3select_result;
     }

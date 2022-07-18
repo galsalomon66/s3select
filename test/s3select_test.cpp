@@ -1018,7 +1018,7 @@ TEST(TestS3selectFunctions, case_value_multiplerows)
   std::string input;
   size_t size = 10000;
   generate_rand_columns_csv(input, size);
-  const std::string input_query = "select case cast(_1 as int) when cast(_2 as int) then \"case_1_1\" else \"case_2_2\" end from s3object;";
+  std::string input_query = "select case cast(_1 as int) when cast(_2 as int) then \"case_1_1\" else \"case_2_2\" end from s3object;";
 
   std::string s3select_result = run_s3select(input_query,input);
 
@@ -1027,6 +1027,30 @@ TEST(TestS3selectFunctions, case_value_multiplerows)
   std::string s3select_result_2 = run_s3select(input_query_2,input);
 
   ASSERT_EQ(s3select_result,s3select_result_2);
+
+  //the following test query, validates correct build of the AST.
+  //the query contain various combinations, such as nested case-when-else, aggregation for case-when
+  //binary-operation with aggregation function.  
+  input_query.assign("select 2+ sum(case when int(_1)>100 then (case when int(_1)>100 then 1 else 0 end) else 0 end) + \
+					  sum(case when int(_1)<=100 then (case when int(_1)<=100 then 1 else 0 end) else 0 end) , \
+					  count(0) , \
+					  sum(case when int(_2)>100 then (case when int(_2)>100 then 1 else 0 end) else 0 end) + \
+					  sum(case when int(_2)<=100 then (case when int(_2)<=100 then 1 else 0 end) else 0 end) + 1  from s3object;");
+
+  s3select_result = run_s3select(input_query,input);
+
+  std::string expected_result = std::to_string(size+2) + "," + std::to_string(size) + "," + std::to_string(size+1);
+  ASSERT_EQ(s3select_result,expected_result);
+
+  
+  //aggregation function on top of nested case-when, case-when statement contains binary operation.
+  input_query.assign("select sum(case when int(_2)>100 then (case when int(_2)>100 then 1 else 0 end)*2 else 0 end+1) + \
+		  sum(case when int(_2)<=100 then (case when int(_2)<=100 then 1 else 0 end)*2 else 0 end) from s3object;");
+
+  s3select_result = run_s3select(input_query,input);
+
+  expected_result = std::to_string(size*3);
+  ASSERT_EQ(s3select_result,expected_result);
 }
 
 TEST(TestS3selectFunctions, nested_call_aggregate_with_non_aggregate )

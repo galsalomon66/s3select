@@ -59,7 +59,6 @@ struct actionQ
   std::vector<std::string> dataTypeQ;
   std::vector<std::string> trimTypeQ;
   std::vector<std::string> datePartQ;
-  std::vector<base_statement*> caseValueQ;
   projection_alias alias_map;
   std::string from_clause;
   std::vector<std::string> json_from_clause;
@@ -70,11 +69,11 @@ struct actionQ
   bool projection_or_predicate_state; //true->projection false->predicate(where-clause statement)
   std::vector<base_statement*> predicate_columns;
   std::vector<base_statement*> projections_columns; 
+  base_statement* first_when_then_expr;
 
   std::vector<std::vector<std::string>> json_variables;//contains all key-path according to sql statement
-  size_t when_then_count;
 
-  actionQ(): inMainArg(0),from_clause("##"),column_prefix("##"),table_alias("##"),projection_or_predicate_state(true),when_then_count(0){}//TODO remove when_then_count
+  actionQ(): inMainArg(0),from_clause("##"),column_prefix("##"),table_alias("##"),projection_or_predicate_state(true),first_when_then_expr(nullptr){}
 
   std::map<const void*,std::vector<const char*> *> x_map;
 
@@ -336,11 +335,11 @@ struct push_when_value_then : public base_ast_builder
 };
 static push_when_value_then g_push_when_value_then;
 
-struct push_case_value : public base_ast_builder
+struct push_case_value_when_value_else : public base_ast_builder
 {
   void builder(s3select* self, const char* a, const char* b) const;
 };
-static push_case_value g_push_case_value;
+static push_case_value_when_value_else g_push_case_value_when_value_else;
 
 struct push_substr_from : public base_ast_builder
 {
@@ -636,8 +635,8 @@ public:
 
       when_stmt = (S3SELECT_KW("when") >> condition_expression >> S3SELECT_KW("then") >> arithmetic_expression)[BOOST_BIND_ACTION(push_when_condition_then)];
 
-      when_case_value_when = (S3SELECT_KW("case") >> arithmetic_expression[BOOST_BIND_ACTION(push_case_value)]  >> 
-                              (+when_value_then) >> S3SELECT_KW("else") >> arithmetic_expression >> S3SELECT_KW("end")) [BOOST_BIND_ACTION(push_case_when_else)];
+      when_case_value_when = (S3SELECT_KW("case") >> arithmetic_expression >> 
+                              (+when_value_then) >> S3SELECT_KW("else") >> arithmetic_expression >> S3SELECT_KW("end")) [BOOST_BIND_ACTION(push_case_value_when_value_else)];
 
       when_value_then = (S3SELECT_KW("when") >> arithmetic_expression >> S3SELECT_KW("then") >> arithmetic_expression)[BOOST_BIND_ACTION(push_when_value_then)];
 
@@ -694,7 +693,7 @@ public:
 
       list_of_function_arguments = (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)] >> *(',' >> (arithmetic_expression)[BOOST_BIND_ACTION(push_function_arg)]);
 
-      reserved_function_names = (S3SELECT_KW("when")|S3SELECT_KW("case")|S3SELECT_KW("then"));
+      reserved_function_names = (S3SELECT_KW("when")|S3SELECT_KW("case")|S3SELECT_KW("then")|S3SELECT_KW("not"));
      
       function = ( ((variable - reserved_function_names)  >> '(' )[BOOST_BIND_ACTION(push_function_name)] >> !list_of_function_arguments >> ')')[BOOST_BIND_ACTION(push_function_expr)];
 
@@ -760,7 +759,7 @@ public:
 
       or_op =  S3SELECT_KW("or");
 
-      variable_name =  bsc::lexeme_d[(+bsc::alpha_p >> *( bsc::alpha_p | bsc::digit_p | '_') ) -  S3SELECT_KW("not")];
+      variable_name =  bsc::lexeme_d[(+bsc::alpha_p >> *( bsc::alpha_p | bsc::digit_p | '_') ) - reserved_function_names];
 
       variable = (variable_name >> "." >> variable_name) | variable_name;
 
@@ -1527,8 +1526,10 @@ void push_is_null_predicate::builder(s3select* self, const char* a, const char* 
 
 void push_when_condition_then::builder(s3select* self, const char* a, const char* b) const
 {
+//purpose: each new function node, provide execution for (if {condition} then {expresion} )
   std::string token(a, b);
 
+  // _fn_when_then
   __function* func = S3SELECT_NEW(self, __function, "#when-then#", self->getS3F());
 
  base_statement* then_expr = self->getAction()->exprQ.back();
@@ -1540,54 +1541,87 @@ void push_when_condition_then::builder(s3select* self, const char* a, const char
  func->push_argument(then_expr);
  func->push_argument(when_expr);
 
- self->getAction()->whenThenQ.push_back(func);
+ self->getAction()->exprQ.push_back(func);
 
- self->getAction()->when_then_count ++;
+  // the first_when_then_expr mark the first when-then expression, it is been used later upon complete the full statement (case when ... then ... else ... end)
+ if(self->getAction()->first_when_then_expr == nullptr)
+ {	
+  self->getAction()->first_when_then_expr = func;
+ }
 }
 
 void push_case_when_else::builder(s3select* self, const char* a, const char* b) const
 {
+//purpose: provide the execution for complete statement, i.e. (case when {expression} then {expression} else {expression} end)
   std::string token(a, b);
 
   base_statement* else_expr = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
 
+  // _fn_case_when_else
   __function* func = S3SELECT_NEW(self, __function, "#case-when-else#", self->getS3F());
 
   func->push_argument(else_expr);
 
-  while(self->getAction()->when_then_count)
+  base_statement* when_then_func = nullptr;
+
+  // the loop ended upon reaching the first when-then
+  while(when_then_func != self->getAction()->first_when_then_expr)
   {
-    base_statement* when_then_func = self->getAction()->whenThenQ.back();
-    self->getAction()->whenThenQ.pop_back();
-
+    // poping from whenThen-queue and pushing to function arguments list
+    when_then_func = self->getAction()->exprQ.back();
+    self->getAction()->exprQ.pop_back();
     func->push_argument(when_then_func);
-
-    self->getAction()->when_then_count--;
   }
-
-// condQ is cleared explicitly, because of "leftover", due to double scanning upon accepting
-// the following rule '(' condition-expression ')' , i.e. (3*3 == 12)
-// Because of the double-scan (bug in spirit?defintion?), a sub-tree for the left side is created, twice.
-// thus, it causes wrong calculation.
-
-  self->getAction()->exprQ.clear();
-
+  
+  self->getAction()->first_when_then_expr = nullptr;
+  //func is the complete statement,  implemented by _fn_case_when_else
   self->getAction()->exprQ.push_back(func);
 }
 
-void push_case_value::builder(s3select* self, const char* a, const char* b) const
+void push_case_value_when_value_else::builder(s3select* self, const char* a, const char* b) const
 {
+//purpose: provide execution for the complete statement. i.e. case-value-when-value-else-value-end
   std::string token(a, b);
 
+  base_statement* else_expr = self->getAction()->exprQ.back();
+  self->getAction()->exprQ.pop_back();
+
+  // _fn_case_when_else
+  __function* func = S3SELECT_NEW(self, __function, "#case-when-else#", self->getS3F());
+
+  // push the else expression 
+  func->push_argument(else_expr);
+
+  // poping the case-value  
   base_statement* case_value = self->getAction()->exprQ.back();
   self->getAction()->exprQ.pop_back();
 
-  self->getAction()->caseValueQ.push_back(case_value);
+  base_statement* when_then_func = nullptr;
+  
+  //poping all when-value-then expression(_fn_when_value_then) and add the case-value per each
+  while(self->getAction()->whenThenQ.empty() == false)
+  {
+    when_then_func = self->getAction()->whenThenQ.back();
+    if (dynamic_cast<__function*>(when_then_func))
+    {
+      // adding the case-value as argument
+      dynamic_cast<__function*>(when_then_func)->push_argument(case_value);
+    }
+    else 
+      throw base_s3select_exception("failed to create AST for case-value-when construct", base_s3select_exception::s3select_exp_en_t::FATAL);
+
+    self->getAction()->whenThenQ.pop_back(); 
+ 
+    func->push_argument(when_then_func);
+  }
+  //pushing the execution function for the complete statement
+  self->getAction()->exprQ.push_back(func);
 }
 
 void push_when_value_then::builder(s3select* self, const char* a, const char* b) const
 {
+  //provide execution of when-value-then-value :: _fn_when_value_then
   std::string token(a, b);
 
   __function* func = S3SELECT_NEW(self, __function, "#when-value-then#", self->getS3F());
@@ -1598,15 +1632,10 @@ void push_when_value_then::builder(s3select* self, const char* a, const char* b)
  base_statement* when_expr = self->getAction()->exprQ.back();
  self->getAction()->exprQ.pop_back();
 
- base_statement* case_expr = self->getAction()->caseValueQ.back();
-
  func->push_argument(then_expr);
  func->push_argument(when_expr);
- func->push_argument(case_expr);
-
+  //each when-value-then-value pushed to dedicated queue
  self->getAction()->whenThenQ.push_back(func);
-
- self->getAction()->when_then_count ++;
 }
 
 void push_cast_expr::builder(s3select* self, const char* a, const char* b) const
