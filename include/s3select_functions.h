@@ -570,7 +570,20 @@ struct _fn_count : public base_function
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
   {
-    count += 1;
+    if (args->size())
+    {// in case argument exist, should count only non-null.
+      auto iter = args->begin();
+      base_statement* x = *iter;
+
+      if(!x->eval().is_null())
+      {
+	count += 1;
+      }
+    }
+    else
+    {//in case of non-arguments // count()
+	count += 1;
+    }
 
     return true;
   }
