@@ -555,6 +555,12 @@ public:
     type = value_En_t::S3NULL;
   }
 
+  void set_string_nocopy(char* str)
+  {//purpose: value does not own the string
+     __val.str = str;
+    type = value_En_t::STRING;
+  }
+
   value_En_t _type() const { return type; }
 
   void set_json_key_path(std::vector<std::string>& key_path)
@@ -644,8 +650,15 @@ public:
   {
     if(o.type == value_En_t::STRING)
     {
-      m_str_value = o.m_str_value;
-      __val.str = m_str_value.data();
+      if(o.m_str_value.size())
+      {
+	m_str_value = o.m_str_value;
+	__val.str = m_str_value.data();
+      }
+      else if(o.__val.str)
+      {
+	__val.str = o.__val.str;
+      }
     }
     else
     {
@@ -661,8 +674,15 @@ public:
   {
     if(o.type == value_En_t::STRING)
     {
-      m_str_value.assign(o.str());
-      __val.str = m_str_value.data();
+      if(o.m_str_value.size())
+      {
+	m_str_value = o.m_str_value;
+	__val.str = m_str_value.data();
+      }
+      else if(o.__val.str)
+      {
+	__val.str = o.__val.str;
+      }
     }
     else
     {
@@ -1076,7 +1096,6 @@ class scratch_area
 {
 
 private:
-  std::vector<std::string_view> m_columns{128};//TODO not correct
   std::vector<value> *m_schema_values; //values got a type
   int m_upper_bound;
 
@@ -1130,8 +1149,8 @@ public:
       {
         break;
       }
-
-      m_columns[i++] = s;//TODO no need for copy, could use reference to tokens
+      //not copy the string content.
+      (*m_schema_values)[i++].set_string_nocopy(s);
     }
     m_upper_bound = i;
 
@@ -1159,41 +1178,13 @@ public:
 
   void get_column_value(uint16_t column_pos, value &v)
   {
-
-    if (parquet_type == false)
-    {
-      if (column_pos >= m_upper_bound) //|| column_pos < 0)
-      {
-        throw base_s3select_exception("column_position_is_wrong", base_s3select_exception::s3select_exp_en_t::ERROR);
-      }
-      
-      v = m_columns[ column_pos ].data();
-    }
-    else
-    {
-      v = (*m_schema_values)[ column_pos ];
-    }
-    
+    v = (*m_schema_values)[ column_pos ];
   }
 
-
-  std::string_view get_column_value(int column_pos)//TODO reuse it
+  std::string_view get_column_value(int column_pos)
   {
-    if ((column_pos >= m_upper_bound) || column_pos < 0)
-    {
-      throw base_s3select_exception("column_position_is_wrong", base_s3select_exception::s3select_exp_en_t::ERROR);
-    }
-
-     if (parquet_type == false)
-     {
-      return m_columns[column_pos];
-     }
-     else
-     {
-       return  (*m_schema_values)[ column_pos ].to_string();
-     }
+    return  (*m_schema_values)[ column_pos ].to_string();
   }
-
 
   int get_num_of_columns()
   {
@@ -1212,6 +1203,11 @@ public:
       max_json_idx = json_idx;
     }
     (*m_schema_values)[ json_idx ] = v;
+
+    if(json_idx>m_upper_bound)
+    {
+      m_upper_bound = json_idx;
+    }
     return 0;
   }
 
@@ -1263,7 +1259,7 @@ public:
         default:
         return -1;
       }
-      m_upper_bound++;
+      m_upper_bound = *column_pos_iter;
       column_pos_iter ++;
     }
     return 0;
@@ -1769,7 +1765,7 @@ public:
       m_scratch->get_column_value(column_pos,var_value);
       //in the case of successive column-delimiter {1,some_data,,3}=> third column is NULL 
       if (var_value.is_string() && (var_value.str()== 0 || (var_value.str() && *var_value.str()==0)))
-          var_value.setnull();
+          var_value.setnull();//TODO is it correct for Parquet
     }
 
     return var_value;
