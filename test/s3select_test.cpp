@@ -915,11 +915,10 @@ TEST(TestS3SElect, from_stdin)
     std::string input;
     size_t size = 128;
     generate_csv(input, size);
-    status = s3_csv_object.run_s3select_on_object(s3select_result, input.c_str(), input.size(),
-        false, // dont skip first line 
-        false, // dont skip last line
-        true   // aggregate call
-        ); 
+    std::string input_copy = input;
+    s3select_result = run_s3select(input_query,input);
+
+    ASSERT_EQ(input_copy, s3select_result);
     ASSERT_EQ(status, 0);
 }
 

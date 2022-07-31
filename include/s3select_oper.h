@@ -1181,19 +1181,14 @@ public:
     v = (*m_schema_values)[ column_pos ];
   }
 
-  std::string_view get_column_value(int column_pos)
+  value* get_column_value(uint16_t column_pos)
   {
-    return  (*m_schema_values)[ column_pos ].to_string();
+    return &(*m_schema_values)[ column_pos ];
   }
-
+  
   int get_num_of_columns()
   {
     return m_upper_bound;
-  }
-
-  void init_string_buff() //TODO temporary
-  {
-    buff_loc=0;
   }
 
   int update_json_varible(value v,int json_idx)
@@ -1259,7 +1254,7 @@ public:
         default:
         return -1;
       }
-      m_upper_bound = *column_pos_iter;
+      m_upper_bound = *column_pos_iter+1;
       column_pos_iter ++;
     }
     return 0;
@@ -1489,9 +1484,6 @@ private:
   std::string _name;
   int column_pos;
   value var_value;
-  std::string m_star_op_result;
-  char m_star_op_result_charc[4096]; //TODO cause larger allocations for other objects containing variable (dynamic is one solution)
-  std::vector<value> star_operation_values;
   int json_variable_idx;
 
   const int undefined_column_pos = -1;
@@ -1603,7 +1595,7 @@ public:
 
   void set_value(bool b)
   {
-  	var_value = b;
+    var_value = b;
     var_value.type = value::value_En_t::BOOL;
   }
 
@@ -1657,32 +1649,12 @@ public:
     if(is_json_statement()) 
 	return json_star_operation();
 
-    size_t pos=0;
-    size_t num_of_columns = m_scratch->get_num_of_columns();
-    var_value.multiple_values.clear(); //TODO var_value.clear()??
-
-    star_operation_values.reserve(num_of_columns);
-    for(size_t i=0; i<num_of_columns; i++)
+    var_value.multiple_values.clear();
+    for(int i=0; i<m_scratch->get_num_of_columns(); i++)
     {
-      size_t len = m_scratch->get_column_value(i).size();
-      if((pos+len)>sizeof(m_star_op_result_charc))
-      {
-        throw base_s3select_exception("result line too long", base_s3select_exception::s3select_exp_en_t::FATAL);
-      }
-
-      memcpy(&m_star_op_result_charc[pos], m_scratch->get_column_value(i).data(), len);//TODO using string_view will avoid copy
-      m_star_op_result_charc[ pos + len ] = 0;
-
-      value v1(m_star_op_result_charc+pos);
-      star_operation_values.push_back(v1);
-      var_value.multiple_values.push_value( &star_operation_values.back() );
-
-      pos += len;
-      pos ++;
+      var_value.multiple_values.push_value( m_scratch->get_column_value(i) );
     }
-
     var_value.type = value::value_En_t::MULTIPLE_VALUES;
-
     return var_value;
   }
 
