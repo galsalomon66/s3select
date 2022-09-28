@@ -243,8 +243,8 @@ class s3select_functions
 private:
 
   using FunctionLibrary = std::map<std::string, s3select_func_En_t>;
-  std::list<base_statement*> __all_query_functions;
   s3select_allocator* m_s3select_allocator;
+  std::set<base_statement*>* m_ast_nodes_for_cleanup;
 
   const FunctionLibrary m_functions_library =
   {
@@ -309,18 +309,19 @@ public:
 
   base_function* create(std::string_view fn_name,const bs_stmt_vec_t&);
 
-  s3select_functions():m_s3select_allocator(nullptr)
+  s3select_functions():m_s3select_allocator(nullptr),m_ast_nodes_for_cleanup(nullptr)
   {
   }
 
-  void push_for_cleanup(base_statement* f)
-  {
-    __all_query_functions.push_back(f);
-  }
 
   void setAllocator(s3select_allocator* alloc)
   {
     m_s3select_allocator = alloc;
+  }
+
+  void set_AST_nodes_for_cleanup(std::set<base_statement*>* ast_for_cleanup)
+  {
+	m_ast_nodes_for_cleanup = ast_for_cleanup;
   }
 
   s3select_allocator* getAllocator()
@@ -364,10 +365,7 @@ private:
     }
     m_func_impl = f;
     m_is_aggregate_function= m_func_impl->is_aggregate();
-    m_s3select_functions->push_for_cleanup(this);
-    //placement new is releasing the main-buffer in which all AST nodes
-    //allocating from it. meaning no calls to destructors.
-    //the cleanup method will trigger all destructors.
+
   }
 
 public:
@@ -484,20 +482,6 @@ public:
 
   virtual ~__function() = default;
 };
-
-
-  void s3select_functions::clean()
-  {
-    for(auto d : __all_query_functions)
-    {
-      if (d->is_function())
-      {
-        dynamic_cast<__function*>(d)->impl()->dtor();
-      }
-      d->dtor();
-    }
-
-  }
 
 /*
     s3-select function defintions
@@ -2475,6 +2459,30 @@ bool base_statement::mark_aggreagtion_subtree_to_execute()
   }
 
   return true;
+}
+
+void base_statement::push_for_cleanup(std::set<base_statement*>& ast_nodes_to_delete)//semantic loop on each projection
+{
+//placement new is releasing the main-buffer in which all AST nodes
+//allocating from it. meaning no calls to destructors.
+//the purpose of this routine is to traverse the AST in map all nodes for cleanup.
+//the cleanup method will trigger all destructors.
+
+  ast_nodes_to_delete.insert(this);
+
+  if (left())
+    left()->push_for_cleanup(ast_nodes_to_delete);
+  
+  if(right())
+    right()->push_for_cleanup(ast_nodes_to_delete);
+
+  if (is_function())
+  {
+      for (auto& i : dynamic_cast<__function*>(this)->get_arguments())
+      {
+          i->push_for_cleanup(ast_nodes_to_delete);
+      }
+  }
 }
 
 #ifdef _ARROW_EXIST

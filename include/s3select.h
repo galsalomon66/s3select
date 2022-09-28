@@ -419,18 +419,13 @@ struct s3select : public bsc::grammar<s3select>
 private:
 
   actionQ m_actionQ;
-
   scratch_area m_sca;
-
   s3select_functions m_s3select_functions;
-
   std::string error_description;
-
   s3select_allocator m_s3select_allocator;
-
   bool aggr_flow;
-  
   bool m_json_query;
+  std::set<base_statement*> m_ast_nodes_to_delete;
 
 #define BOOST_BIND_ACTION( push_name ) boost::bind( &push_name::operator(), g_ ## push_name, const_cast<s3select*>(&self), _1, _2)
 
@@ -462,7 +457,12 @@ public:
         error_description = "nested aggregation function is illegal i.e. sum(...sum ...)";
         throw base_s3select_exception(error_description, base_s3select_exception::s3select_exp_en_t::FATAL);
       }
+
+      e->push_for_cleanup(m_ast_nodes_to_delete);
     }
+
+    if(get_filter())
+	    get_filter()->push_for_cleanup(m_ast_nodes_to_delete);
 
     if (aggr_flow == true)
     {// atleast one projection column contain aggregation function
@@ -539,6 +539,7 @@ public:
   s3select()
   {
     m_s3select_functions.setAllocator(&m_s3select_allocator);
+    m_s3select_functions.set_AST_nodes_for_cleanup(&m_ast_nodes_to_delete);
   }
 
   bool is_semantic()//TBD traverse and validate semantics per all nodes
@@ -604,7 +605,16 @@ public:
 
   ~s3select()
   {
-    m_s3select_functions.clean();
+	for(auto it : m_ast_nodes_to_delete)
+	{
+		if (it->is_function())
+      		{//upon its a function, call to the implementation destructor
+        		if(dynamic_cast<__function*>(it)->impl())
+				dynamic_cast<__function*>(it)->impl()->dtor();
+      		}
+		//calling to destrcutor of class-function itself, or non-function destructor
+		it->dtor();
+	}
   }
 
 #define JSON_ROOT_OBJECT "s3object[*]"
@@ -1278,9 +1288,6 @@ void push_column_pos::builder(s3select* self, const char* a, const char* b) cons
   {
     v = S3SELECT_NEW(self, variable, token, variable::var_t::STAR_OPERATION);
 
-    //NOTE: variable may leak upon star-operation(multi_value object is not destruct entirly, it contain stl-vactor which is allocated on heap).
-    //TODO: find a generic way for such use-cases, one possible solution is to push all-nodes(upon AST is complete) into cleanup-container.
-    self->getS3F()->push_for_cleanup(v);
   }
   else
   {
@@ -1950,7 +1957,7 @@ protected:
 public:
   s3select_csv_definitions m_csv_defintion;//TODO add method for modify
 
-  explicit base_s3object(s3select* m)
+  void set_base_defintions(s3select* m)
   {	
     m_s3_select=m;
     m_sa=m_s3_select->get_scratch_area();
@@ -1969,6 +1976,16 @@ public:
     }
     m_is_to_aggregate = true;//TODO not correct. should be set upon end-of-stream
     m_aggr_flow = m_s3_select->is_aggregate_query();
+  }
+
+  base_s3object():m_sa(nullptr),m_is_to_aggregate(false),m_where_clause(nullptr),m_s3_select(nullptr),m_error_count(0){}
+
+  explicit base_s3object(s3select* m)
+  {
+    if(m)
+	{
+        set_base_defintions(m);
+	}
   }
 
   virtual bool is_end_of_stream() {return false;}
@@ -2148,9 +2165,10 @@ public:
   {
     if(m_s3_select != nullptr) 
     {
-      return;
+      //return;
     }
 
+    set_base_defintions(s3_query);
     m_csv_defintion = csv;
   }
 
@@ -2261,6 +2279,31 @@ public:
       m_error_description = "out of memory";
       return -1;
     }
+    catch(io::error::escaped_char_missing& err)
+    {
+      m_error_description = "escaped_char_missing failure while csv parsing";
+      return -1;
+    }
+	catch(io::error::escaped_string_not_closed& err)
+    {
+      m_error_description = "escaped_string_not_closed failure while csv parsing";
+      return -1;
+    }
+	catch(io::error::line_length_limit_exceeded& err)
+    {
+      m_error_description = "line_length_limit_exceeded failure while csv parsing";
+      return -1;
+    }
+	catch(io::error::with_file_name& err)
+    {
+      m_error_description = "with_file_name failure while csv parsing";
+      return -1;
+    }
+	catch(io::error::with_file_line& err)
+    {
+      m_error_description = "with_file_line failure while csv parsing";
+      return -1;
+    }
 
     return status;
   }
@@ -2292,7 +2335,7 @@ private:
       run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
     }
 
-    if (csv_stream[stream_length - 1] != m_csv_defintion.row_delimiter)
+    if (stream_length && csv_stream[stream_length - 1] != m_csv_defintion.row_delimiter)
     {
       //in case of "broken" last line
       char* p_obj_chunk = (char*)&(csv_stream[stream_length - 1]);

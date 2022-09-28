@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <set>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -146,7 +147,7 @@ public:
     _msg = n;
   }
 
-  virtual const char* what()
+  virtual const char* what() const _GLIBCXX_NOTHROW
   {
     return _msg.c_str();
   }
@@ -1389,6 +1390,7 @@ public:
   bool is_column_reference() const;
   bool mark_aggreagtion_subtree_to_execute();
   bool is_statement_contain_star_operation() const;
+  void push_for_cleanup(std::set<base_statement*>&);
 
 #ifdef _ARROW_EXIST
   void extract_columns(parquet_file_parser::column_pos_t &cols,const uint16_t max_columns);

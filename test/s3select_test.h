@@ -415,7 +415,11 @@ std::string run_expression_in_C_prog(const char* expression)
 
   if(!res)
   {
-    return std::string("#ERROR#");
+  if(prog_c)
+    free(prog_c);
+
+  fclose(fp_build);
+  return std::string("#ERROR#");
   }
 
   unlink(c_run_file.c_str());
