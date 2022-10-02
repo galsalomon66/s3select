@@ -433,7 +433,7 @@ int run_on_localFile(char* input_query)
     }
   }
 
-  FILE* fp;
+  FILE* fp = nullptr;
 
   if (object_name.compare("stdin")==0)
   {
@@ -477,7 +477,14 @@ int run_on_localFile(char* input_query)
   {
     size_t input_sz = fread(buff, 1, BUFF_SIZE, fp);
     char* in=buff;
-    status = s3_csv_object.run_s3select_on_stream(s3select_result, in, input_sz, statbuf.st_size);
+    if(fp != stdin)
+    {
+    	status = s3_csv_object.run_s3select_on_stream(s3select_result, in, input_sz, statbuf.st_size);
+    }
+    else
+    {
+    	status = s3_csv_object.run_s3select_on_stream(s3select_result, in, input_sz, INT_MAX);
+    }
 
     if(status<0)
     {
@@ -490,18 +497,27 @@ int run_on_localFile(char* input_query)
       std::cout << s3select_result;
     }
 
-    s3select_result = "";
     if(!input_sz || feof(fp))
     {
-      break;
+	if(fp==stdin)
+	{
+		//last processing cycle
+    		status = s3_csv_object.run_s3select_on_stream(s3select_result, nullptr, 0, 0);
+    		if(s3select_result.size()>0)
+    		{
+      			std::cout << s3select_result;
+    		}
+	}
+	break;
     }
 
-  }
+    s3select_result.clear();
+  }//end-while
 
-  free(buff);
-  fclose(fp);
+    free(buff);
+    fclose(fp);
 
-  return 0;
+    return 0;
 }
 
 int run_on_single_query(const char* fname, const char* query)
