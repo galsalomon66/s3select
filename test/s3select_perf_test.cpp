@@ -13,7 +13,7 @@ void run_query(std::string& query, std::string& csv, std::string profiler_file, 
 
   ProfilerStart(profiler_file.c_str());
 
-  result = run_s3select(query, csv);
+  result = run_s3select(query, csv,JSON_NO_RUN);
 
   ProfilerFlush();
   ProfilerStop();
@@ -460,7 +460,7 @@ TEST(TestS3SelectPerformance, LIKE_CONSTANT_SMALL)
 
   run_query(input_query, input_csv, "./perf_.txt", s3select_res);
 
-  EXPECT_EQ(s3select_res, "100000");
+  EXPECT_EQ(s3select_res,std::to_string(COUNT).c_str());
 }
 
 TEST(TestS3SelectPerformance, LIKE_CONSTANT_LARGE)
@@ -472,7 +472,7 @@ TEST(TestS3SelectPerformance, LIKE_CONSTANT_LARGE)
 
   run_query(input_query, input_csv, "./perf_.txt", s3select_res);
 
-  EXPECT_EQ(s3select_res, "100000");
+  EXPECT_EQ(s3select_res, std::to_string(COUNT).c_str());
 }
 
 TEST(TestS3SelectPerformance, LIKE_DYNAMIC)
@@ -484,5 +484,5 @@ TEST(TestS3SelectPerformance, LIKE_DYNAMIC)
 
   run_query(input_query, input_csv, "./perf_.txt", s3select_res);
 
-  EXPECT_EQ(s3select_res, "100000");
+  EXPECT_EQ(s3select_res, std::to_string(COUNT).c_str());
 }

@@ -40,6 +40,7 @@ using parquet::schema::PrimitiveNode;
 constexpr int NUM_ROWS = 100000;
 constexpr int64_t ROW_GROUP_SIZE = 1024 * 1024;
 const char PARQUET_FILENAME[] = "/tmp/csv_converted.parquet";
+#define JSON_NO_RUN "no_run"
 
 class tokenize {
 
@@ -694,8 +695,10 @@ std::string run_s3select(std::string expression,std::string input, const char* j
     json_query = convert_query(expression);
   }
 
-  run_json_query(json_query, js, json_result);
-  json_csv_report_error(json_result, s3select_result);
+  if(strcmp(json_query,JSON_NO_RUN)) {
+	run_json_query(json_query, js, json_result);
+	json_csv_report_error(json_result, s3select_result);
+  }
 
   return s3select_result;
 }
