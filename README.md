@@ -3,7 +3,7 @@
 <br />The s3select is an implementation of a push-down paradigm.
 <br />The push-down paradigm is about moving(“pushing”) the operation close to the data.
 <br />It's contrary to what is commonly done, i.e. moving the data to the “place” of operation.
-<br />In a big-data ecosystem, it's a big difference. 
+<br />In a big-data ecosystem, it makes a big difference. 
 <br />In order to execute __“select sum( x + y) from s3object where a + b > c”__ 
 <br />It needs to fetch the entire object to the client side, and only then execute the operation with an analytic application,
 <br />With push-down(s3-select) the entire operation is executed on the server side, and only the result is returned to the client side.
