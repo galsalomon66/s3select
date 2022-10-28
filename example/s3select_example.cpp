@@ -399,7 +399,6 @@ int process_json_query(const char* input_query,const char* fname)
 
 int run_on_localFile(char* input_query)
 {
-
   //purpose: demostrate the s3select functionalities
   s3select s3select_syntax;
 
@@ -444,7 +443,6 @@ int run_on_localFile(char* input_query)
     fp  = fopen(object_name.c_str(), "r");
   }
 
-
   if(!fp)
   {
     std::cout << " input stream is not valid, abort;" << std::endl;
@@ -452,31 +450,58 @@ int run_on_localFile(char* input_query)
   }
 
   struct stat statbuf;
-
   lstat(object_name.c_str(), &statbuf);
 
   std::string s3select_result;
   s3selectEngine::csv_object::csv_defintions csv;
   csv.use_header_info = false;
-  //csv.column_delimiter='|';
-  //csv.row_delimiter='\t';
-
-
   csv.quote_fields_always=false;
 
-  if(getenv("CSV_ALWAYS_QUOT"))
+#define CSV_QUOT "CSV_ALWAYS_QUOT"
+#define CSV_COL_DELIM "CSV_COLUMN_DELIMETER"
+#define CSV_ROW_DELIM "CSV_ROW_DELIMITER"
+#define CSV_HEADER_INFO "CSV_HEADER_INFO"
+
+  if(getenv(CSV_QUOT))
   {
 	csv.quote_fields_always=true;
+  }
+  if(getenv(CSV_COL_DELIM))
+  {
+	csv.column_delimiter=*getenv(CSV_COL_DELIM);
+  }
+  if(getenv(CSV_ROW_DELIM))
+  {
+	csv.row_delimiter=*getenv(CSV_ROW_DELIM);
+  }
+  if(getenv(CSV_HEADER_INFO))
+  {
+	csv.use_header_info = true;
   }
   	
   s3selectEngine::csv_object  s3_csv_object(&s3select_syntax, csv);
 
-#define BUFF_SIZE 1024*1024*4 //simulate 4mb parts in s3 object
+#define BUFF_SIZE (1024*1024*4) //simulate 4mb parts in s3 object
   char* buff = (char*)malloc( BUFF_SIZE );
   while(1)
   {
+    buff[0]=0;
     size_t input_sz = fread(buff, 1, BUFF_SIZE, fp);
     char* in=buff;
+
+    if (!input_sz)
+    {
+	if(fp == stdin)
+	{
+    		status = s3_csv_object.run_s3select_on_stream(s3select_result, nullptr, 0, 0);
+    		if(s3select_result.size()>0)
+    		{
+      			std::cout << s3select_result;
+    		}
+	}
+	break;
+    }
+
     if(fp != stdin)
     {
     	status = s3_csv_object.run_s3select_on_stream(s3select_result, in, input_sz, statbuf.st_size);
@@ -495,20 +520,6 @@ int run_on_localFile(char* input_query)
     if(s3select_result.size()>0)
     {
       std::cout << s3select_result;
-    }
-
-    if(!input_sz || feof(fp))
-    {
-	if(fp==stdin)
-	{
-		//last processing cycle
-    		status = s3_csv_object.run_s3select_on_stream(s3select_result, nullptr, 0, 0);
-    		if(s3select_result.size()>0)
-    		{
-      			std::cout << s3select_result;
-    		}
-	}
-	break;
     }
 
     s3select_result.clear();
@@ -585,17 +596,14 @@ int run_on_single_query(const char* fname, const char* query)
 
 int main(int argc,char **argv)
 {
-//purpose: run many queries (reside in file) on single file.
-
 	char *query=0;
 	char *fname=0;
 	char *query_file=0;//file contains many queries
 
 	for (int i = 0; i < argc; i++)
 	{
-
 		if (!strcmp(argv[i], "-key"))
-		{
+		{//object recieved as CLI parameter
 			fname = argv[i + 1];
 			continue;
 		}
@@ -607,9 +615,15 @@ int main(int argc,char **argv)
 		}
 
 		if (!strcmp(argv[i], "-cmds"))
-		{
+		{//query file contain many queries
 			query_file = argv[i + 1];
 			continue;
+		}
+
+		if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "-help"))
+		{
+			std::cout << "CSV_ALWAYS_QUOT= CSV_COLUMN_DELIMETER= CSV_ROW_DELIMITER= CSV_HEADER_INFO= s3select_example -q \"... query ...\" -key object-path -cmds queries-file" << std::endl; 
+			exit(0);
 		}
 	}
 
@@ -620,30 +634,24 @@ int main(int argc,char **argv)
 
 	if(query_file)
 	{
+		//purpose: run many queries (reside in file) on single file.
 		std::fstream f(query_file, std::ios::in | std::ios::binary);
-
 		const auto sz = boost::filesystem::file_size(query_file);
-
 		std::string result(sz, '\0');
-
 		f.read(result.data(), sz);
-
 		boost::char_separator<char> sep("\n");
 		boost::tokenizer<boost::char_separator<char>> tokens(result, sep);
+
 		for (const auto& t : tokens) {
 			std::cout << t << std::endl;
-
 			int status = run_on_single_query(fname,t.c_str());
-
 			std::cout << "status: " << status << std::endl;
 		}
 		
 		return(0);
 	}
 
-
 	int status = run_on_single_query(fname,query);
-
 	return status;
 }
 

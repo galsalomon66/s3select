@@ -2311,9 +2311,11 @@ public:
 private:
   int run_s3select_on_stream_internal(std::string& result, const char* csv_stream, size_t stream_length, size_t obj_size)
   {
-    //purpose: the cv data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
+    //purpose: the CSV data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
     //for later, upon next chunk of data is streaming, the stored-line is merge with current broken-line, and processed.
     std::string tmp_buff;
+	
+    m_processed_bytes += stream_length;
 
     m_skip_first_line = false;
 
@@ -2331,6 +2333,7 @@ private:
       m_previous_line = false;
       m_skip_first_line = true;
 
+      //processing the merged row (previous broken row)
       run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
     }
 
@@ -2348,35 +2351,30 @@ private:
 
       m_previous_line = true;//it means to skip last line
 
-      stream_length -= m_last_line.length();
+      //cut out the broken line
+      stream_length -= (m_last_line.length());
     }
 
-    m_processed_bytes += stream_length;
     return run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
   }
 
 public:
   int run_s3select_on_object(std::string& result, const char* csv_stream, size_t stream_length, bool skip_first_line, bool skip_last_line, bool do_aggregate)
   {
-    if (do_aggregate && m_previous_line)
-    {
-	m_last_line.append(csv_stream,stream_length);
-        stream_length = m_last_line.length();
-        m_stream = &m_last_line[0];
-	m_previous_line = false;
-    }
-    else
-    {
-        m_stream = (char*)csv_stream;
-    }
-
-    m_end_stream = (char*)m_stream + stream_length;
+    m_stream = (char*)csv_stream;
+    m_end_stream = (char*)csv_stream + stream_length;
     m_is_to_aggregate = do_aggregate;
     m_skip_last_line = skip_last_line;
 
     CSVParser _csv_parser("csv", m_stream, m_end_stream);
     csv_parser = &_csv_parser;
-    csv_parser->set_csv_def(m_csv_defintion.row_delimiter, m_csv_defintion.column_delimiter, m_csv_defintion.quot_char, m_csv_defintion.escape_char, m_csv_defintion.comment_empty_lines, m_csv_defintion.comment_chars, m_csv_defintion.trim_chars);
+    csv_parser->set_csv_def(	m_csv_defintion.row_delimiter, 
+		    		m_csv_defintion.column_delimiter, 
+				m_csv_defintion.quot_char, 
+				m_csv_defintion.escape_char, 
+				m_csv_defintion.comment_empty_lines, 
+				m_csv_defintion.comment_chars, 
+				m_csv_defintion.trim_chars);
 
     if(m_extract_csv_header_info == false)
     {

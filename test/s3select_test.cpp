@@ -2755,6 +2755,61 @@ TEST(TestS3selectFunctions, presto_syntax_alignments)
 
 }
 
+TEST(TestS3selectFunctions, csv_chunk_processing)
+{
+//purpose: s3select processes chunk after chunk, doing so it needs to handle the "broken" line issue.
+//i.e to identify partial line, save it and later merge it into with the other part on the next chunk.
+//
+#define STREAM_SIZE 1234
+  std::string input_object, input_stream, s3select_result;
+  size_t input_off = 0,input_sz = 0;
+  int status;
+  s3selectEngine::csv_object::csv_defintions csv;
+  csv.use_header_info = false;
+  s3select s3select_syntax;
+
+
+  std::string input_query = "select * from stdin;";
+  status = s3select_syntax.parse_query(input_query.c_str());
+  s3selectEngine::csv_object  s3_csv_object(&s3select_syntax, csv);
+  
+  generate_rand_csv(input_object, 10000);
+  size_t size_sum = 0;
+  std::string result_aggr;
+
+	while(input_off<input_object.size())
+	{
+		if ((input_object.size() - input_off) < STREAM_SIZE)
+		{
+			input_sz = (input_object.size() - input_off);
+		}
+		else
+		{
+			input_sz = STREAM_SIZE;
+		}
+
+		size_sum += input_sz;
+		input_stream.assign(input_object.data() + input_off, input_object.data() + input_off + input_sz);
+		input_off += (input_sz);
+
+    		status = s3_csv_object.run_s3select_on_stream(s3select_result, input_stream.data(), input_stream.size(), input_object.size());
+
+    		if(status<0)
+    		{
+      			std::cout << "failure on execution " << std::endl << s3_csv_object.get_error_description() <<  std::endl;
+      			break;
+    		}
+
+    		if(s3select_result.size()>0)
+    		{
+			result_aggr.append(s3select_result);
+			s3select_result.clear();
+    		}
+    		s3select_result.clear();
+  	}//while
+	 
+	 ASSERT_EQ(result_aggr,input_object);
+}
 
 // JSON tests
 
