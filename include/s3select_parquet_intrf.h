@@ -1245,7 +1245,8 @@ void SerializedFile::ParseMetaDataOfEncryptedFileWithEncryptedFooter(
   }
 
   file_metadata_ =
-      FileMetaData::Make(metadata_buffer->data(), &metadata_len, default_reader_properties(), file_decryptor_);
+	FileMetaData::Make(metadata_buffer->data(), &metadata_len, file_decryptor_);
+      	//FileMetaData::Make(metadata_buffer->data(), &metadata_len, default_reader_properties(), file_decryptor_); //version>9
 }
 
 void SerializedFile::ParseMetaDataOfEncryptedFileWithPlaintextFooter(
