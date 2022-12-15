@@ -2927,7 +2927,12 @@ TEST(TestS3selectFunctions, json_queries)
 { "type": "home10", "number": "734928_10","addr": 100 }
 ],
 
-"key_after_array": "XXX"
+"key_after_array": "XXX",
+
+"description" : {
+  "main_desc" : "value_1",
+  "second_desc" : "value_2"
+}
 
 }
 )";
@@ -2960,9 +2965,9 @@ TEST(TestS3selectFunctions, json_queries)
   ASSERT_EQ(result,expected_result);
 
   //select specific keys in array, operation on fetched value, from-clause is empty.
-  expected_result=R"(Joe_2,XXX,25
+  expected_result=R"(Joe_2,XXX,25,value_1,value_2
 )";
-  input_query = "select _1.firstname,_1.key_after_array,_1.age+4 from s3object[*];";
+  input_query = "select _1.firstname,_1.key_after_array,_1.age+4,_1.description.main_desc,_1.description.second_desc from s3object[*];";
   run_json_query(input_query, json_input,result);
   ASSERT_EQ(result,expected_result);
 
@@ -3035,6 +3040,8 @@ phoneNumbers.type. : home10
 phoneNumbers.number. : 734928_10
 phoneNumbers.addr. : 100
 key_after_array. : XXX
+description.main_desc. : value_1
+description.second_desc. : value_2
 #=== 0 ===#
 )";
 
@@ -3080,5 +3087,178 @@ phoneNumbers.addr. : 88
 
 }
 
+TEST(TestS3selectFunctions, json_queries_with_array)
+{
+  std::string result;
+  std::string expected_result;
+  std::string input_query;
+
+  std::string INPUT_TEST_ARRAY_NEDICATIONS = R"(
+{
+"problems": [{
+    "Diabetes":[{
+        "medications":[{
+            "medicationsClasses":[{
+                "className":[{
+                    "associatedDrug":[{
+                        "name":"asprin",
+                        "dose":"",
+                        "strength":"500 mg"
+                    },
+		    { "name":"acamol" } 
+		    ],
+                    "associatedDrug2":[{
+                        "name":"somethingElse",
+                        "dose":"",
+                        "strength":"500 mg"
+                    }]
+                }],
+                "className2":[{
+                    "associatedDrug":[{
+                        "name":"asprin",
+                        "dose":"",
+                        "strength":"500 mg"
+                    }],
+                    "associatedDrug2":[{
+                        "name":"somethingElse",
+                        "dose":"",
+                        "strength":"500 mg"
+                    }]
+                }]
+            }]
+        }],
+        "labs":[{
+            "missing_field": "missing_value"
+        }]
+    }],
+    "Asthma":[{}]
+}]
+})";
+
+  expected_result=R"(acamol
+)";
+
+  //access a JSON document containing a complex and nested arrays. this query accesses the object="name" at the second element of associatedDrug (within nested arrays)
+  input_query = "select _1.problems[0].Diabetes[0].medications[0].medicationsClasses[0].className[0].associatedDrug[1].name from s3object[*];";
+  run_json_query(input_query.c_str(), INPUT_TEST_ARRAY_NEDICATIONS, result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(asprin
+)";
+
+  //access a JSON document containing a complex and nested arrays. this query accesses the object="name" at the first element of associatedDrug (within nested arrays)
+  input_query = "select _1.problems[0].Diabetes[0].medications[0].medicationsClasses[0].className[0].associatedDrug[0].name from s3object[*];";
+  run_json_query(input_query.c_str(), INPUT_TEST_ARRAY_NEDICATIONS, result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(somethingElse
+)";
+  //access a JSON document containing a complex and nested arrays. this query accesses the object="name" at the first element of associatedDrug2 (within nested arrays)
+  input_query = "select _1.problems[0].Diabetes[0].medications[0].medicationsClasses[0].className[0].associatedDrug2[0].name from s3object[*];";
+  run_json_query(input_query.c_str(), INPUT_TEST_ARRAY_NEDICATIONS, result);
+  ASSERT_EQ(result,expected_result);
+
+}
+
+TEST(TestS3selectFunctions, json_queries_with_multi_dimensional_array)
+{
+  std::string result;
+  std::string expected_result;
+  std::string input_query;
+
+  //return; //the syntax parser should be modified to accept array[1][2][3] 
+
+std::string input_json_data = R"(
+{
+"firstName": "Joe",
+"lastName": "Jackson",
+"gender": "male",
+"age": "twenty",
+"address": {
+"streetAddress": "101",
+"city": "San Diego",
+"state": "CA"
+},
+
+"firstName": "Joe_2",
+"lastName": "Jackson_2",
+"gender": "male",
+"age": 21,
+"address": {
+"streetAddress": "101",
+"city": "San Diego",
+"state": "CA"
+},
+
+"phoneNumbers": [
+{ "type": "home0", "number": "734928_0", "addr": 0 },
+{ "type": "home1", "number": "734928_1", "addr": 11 },
+{ "type": "home2", "number": "734928_2", "addr": 22 },
+{ "type": "home3", "number": "734928_3", "addr": 33 },
+{ "type": "home4", "number": "734928_4", "addr": 44 },
+{ "type": "home5", "number": "734928_5", "addr": 55 },
+{ "type": "home6", "number": "734928_6", "addr": 66 },
+{ "type": "home7", "number": "734928_7", "addr": 77 },
+{ "type": "home8", "number": "734928_8", "addr": 88 },
+{ "type": "home9", "number": "734928_9", "addr": 99 },
+{ "type": "home10", "number": "734928_10", "addr": 100 },
+"element-11",
+  [ 11 , 22 , 
+    [ 44, 55] ,"post 3D" , 
+    { 
+      "first_key_in_object_in_array" : "value_for_irst_key_in_object_in_array", 
+      "key_in_array" : "value_per_key_in_array" 
+    } 
+  ],
+  {"classname" : "stam"},
+  { "associatedDrug":[{
+                        "name":"asprin",
+                        "dose":"",
+                        "strength":"500 mg"
+                    }],
+                    "associatedDrug#2":[{
+                        "name":"somethingElse",
+                        "dose":"",
+                        "strength":"500 mg"
+                    }]
+}
+],
+"key_after_array": "XXX"
+}
+)";
+
+#if 0
+  //TODO error phoneNumbers[12][2][2] = null, to check what happen upon reaching the final state
+  expected_result=R"(post 3D
+)";
+  input_query = "select _1.phoneNumbers[12][2][2] from s3object[*];";
+  run_json_query(input_query.c_str(), input_json_data, result);
+  ASSERT_EQ(result,expected_result);
+#endif 
+
+  //the following tests ia about accessing multi-dimension array
+  expected_result=R"(55
+)";
+  input_query = "select _1.phoneNumbers[12][2][1] from s3object[*];";
+  run_json_query(input_query.c_str(), input_json_data, result);
+  ASSERT_EQ(result,expected_result);
 
 
+  expected_result=R"(post 3D
+)";
+  input_query = "select _1.phoneNumbers[12][3] from s3object[*];";
+  run_json_query(input_query.c_str(), input_json_data, result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(11
+)";
+  input_query = "select _1.phoneNumbers[12][0] from s3object[*];";
+  run_json_query(input_query.c_str(), input_json_data, result);
+  ASSERT_EQ(result,expected_result);
+
+  expected_result=R"(element-11
+)";
+  input_query = "select _1.phoneNumbers[11] from s3object[*];";
+  run_json_query(input_query.c_str(), input_json_data, result);
+  ASSERT_EQ(result,expected_result);
+ }
