@@ -87,7 +87,7 @@ struct actionQ
   actionQ(): inMainArg(0),from_clause("##"),limit_op(false),column_prefix("##"),table_alias("##"),projection_or_predicate_state(true),first_when_then_expr(nullptr){}
 
   std::map<const void*,std::vector<const char*> *> x_map;
-
+ 
   ~actionQ()
   {
     for(auto m : x_map)
@@ -659,6 +659,11 @@ public:
 		//calling to destrcutor of class-function itself, or non-function destructor
 		it->dtor();
 	}
+
+	for(auto x: m_actionQ.json_statement_variables_match_expression)
+	{//the json_variable_access object is allocated by S3SELECT_NEW. this object contains stl-vector that should be free 
+		x.first->~json_variable_access();
+	}
   }
 
 #define JSON_ROOT_OBJECT "s3object[*]"
@@ -677,7 +682,7 @@ public:
 
       select_expr_base_ = select_expr_base >> S3SELECT_KW("limit") >> (limit_number)[BOOST_BIND_ACTION(push_limit_clause)] | select_expr_base;
 
-      limit_number = bsc::uint_p;
+      limit_number = (+bsc::digit_p);
 
       select_expr_base =  S3SELECT_KW("select") >> projections >> S3SELECT_KW("from") >> (from_expression)[BOOST_BIND_ACTION(push_from_clause)] >> !where_clause ;
 
@@ -2038,18 +2043,39 @@ protected:
   bool m_is_limit_on;
   unsigned long m_limit;
   unsigned long m_processed_rows;
-  enum Status {
-    END_OF_STREAM = -1,
-    INITIAL_STAT = 0,
-    NORMAL_EXIT = 1,
-    LIMIT_REACHED = 2
-  };
+  std::function<void(const char*)> fp_ext_debug_mesg;//dispache debug message into external system
 
 public:
   s3select_csv_definitions m_csv_defintion;//TODO add method for modify
 
+  enum class Status {
+    END_OF_STREAM,
+    INITIAL_STAT,
+    NORMAL_EXIT,
+    LIMIT_REACHED,
+    SQL_ERROR
+  };
+
+  Status m_sql_processing_status;
+
+  Status get_sql_processing_status()
+  {
+	  return m_sql_processing_status;
+  }
+
+  bool is_sql_limit_reached()
+  {
+	  return m_sql_processing_status == Status::LIMIT_REACHED;
+  }
+
   void set_base_defintions(s3select* m)
-  {	
+  {
+    if(m_s3_select || !m)
+    {//not to define twice
+     //not to define with null
+  	return;
+    }
+
     m_s3_select=m;
     m_sa=m_s3_select->get_scratch_area();
     m_error_count=0;
@@ -2077,14 +2103,14 @@ public:
     m_processed_rows = 0;
   }
 
-  base_s3object():m_sa(nullptr),m_is_to_aggregate(false),m_where_clause(nullptr),m_s3_select(nullptr),m_error_count(0){}
+  base_s3object():m_sa(nullptr),m_is_to_aggregate(false),m_where_clause(nullptr),m_s3_select(nullptr),m_error_count(0),m_sql_processing_status(Status::INITIAL_STAT){}
 
-  explicit base_s3object(s3select* m)
+  explicit base_s3object(s3select* m):base_s3object()
   {
     if(m)
-	{
+    {
         set_base_defintions(m);
-	}
+    }
   }
 
   virtual bool is_end_of_stream() {return false;}
@@ -2095,6 +2121,11 @@ public:
   // for the case were the rows are not fetched, but "pushed" by the data-source parser (JSON)
   virtual bool multiple_row_processing(){return true;}
 
+  void set_external_debug_system(std::function<void(const char*)> fp_external)
+  {
+	fp_ext_debug_mesg = fp_external; 
+  }
+
   void result_values_to_string(multi_values& projections_resuls, std::string& result)
   {
     size_t i = 0;
@@ -2103,6 +2134,9 @@ public:
 
     for(auto& res : projections_resuls.values)
     {
+	      if(fp_ext_debug_mesg)
+		      fp_ext_debug_mesg( res->to_string() );
+
             if (m_csv_defintion.quote_fields_always) {
               std::ostringstream quoted_result;
               quoted_result << std::quoted(res->to_string(),m_csv_defintion.output_quot_char, m_csv_defintion.escape_char);
@@ -2126,13 +2160,13 @@ public:
 	result.append(output_row_delimiter);
   }
 
-  int getMatchRow( std::string& result)
+  Status getMatchRow( std::string& result)
   {
     multi_values projections_resuls;
 
     if (m_is_limit_on && m_processed_rows == m_limit)
     {
-      return LIMIT_REACHED;
+      return m_sql_processing_status = Status::LIMIT_REACHED;
     }
     
     if (m_aggr_flow == true)
@@ -2153,7 +2187,7 @@ public:
             }
 
           result_values_to_string(projections_resuls,result);
-          return END_OF_STREAM;
+          return m_sql_processing_status = Status::END_OF_STREAM;
         }
 
         m_processed_rows++;
@@ -2190,7 +2224,7 @@ public:
           }
 
 	  result_values_to_string(projections_resuls,result);
-          return LIMIT_REACHED;
+          return m_sql_processing_status = Status::LIMIT_REACHED;
         }
 
       }
@@ -2204,7 +2238,7 @@ public:
 	columnar_fetch_where_clause_columns();
         if(is_end_of_stream())
         {
-          return END_OF_STREAM;
+          return m_sql_processing_status = Status::END_OF_STREAM;
         }
 
         m_processed_rows++;
@@ -2218,7 +2252,7 @@ public:
 
       if(m_where_clause && !m_where_clause->eval().is_true() && m_is_limit_on && m_processed_rows == m_limit)
       {
-          return LIMIT_REACHED;
+          return m_sql_processing_status = Status::LIMIT_REACHED;
       }
 
       bool found = multiple_row_processing();
@@ -2241,7 +2275,7 @@ public:
 
     }
 
-    return is_end_of_stream() ? END_OF_STREAM : NORMAL_EXIT;
+    return is_end_of_stream() ? (m_sql_processing_status = Status::END_OF_STREAM) : (m_sql_processing_status = Status::NORMAL_EXIT);
     
   }//getMatchRow
 
@@ -2512,10 +2546,10 @@ public:
 
     do
     {
-      int status = INITIAL_STAT;
+      m_sql_processing_status = Status::INITIAL_STAT;
       try
       {
-        status= getMatchRow(result);
+        getMatchRow(result);
       }
       catch (base_s3select_exception& e)
       {
@@ -2527,13 +2561,13 @@ public:
         }
       }
 
-      if (status == END_OF_STREAM)
+      if (m_sql_processing_status == Status::END_OF_STREAM)
       {
         break;
       }
-      else if (status == LIMIT_REACHED) // limit reached
+      else if (m_sql_processing_status == Status::LIMIT_REACHED) // limit reached
       {
-        return status;
+        break;//user should request for sql_processing_status
       }
 
     } while (true);
@@ -2577,22 +2611,18 @@ public:
   {
     if(s3_query)
     {
-      m_s3_select = s3_query;
+      set_base_defintions(s3_query);
     }
-
-    m_sa = m_s3_select->get_scratch_area();
-    m_s3_select->get_scratch_area()->set_parquet_type();
     load_meta_data_into_scratch_area();
     for(auto x : m_s3_select->get_projections_list())
-    {
+    {//traverse the AST and extract all columns reside in projection statement.
         x->extract_columns(m_projections_columns,object_reader->get_num_of_columns());
     }
-
+    //traverse the AST and extract all columns reside in where clause. 
     if(m_s3_select->get_filter())
         m_s3_select->get_filter()->extract_columns(m_where_clause_columns,object_reader->get_num_of_columns());
 
-    m_is_to_aggregate = true; //TODO when to set to true
-    not_to_increase_first_time = true;
+     not_to_increase_first_time = true;
   }
 
   ~parquet_object()
@@ -2632,13 +2662,12 @@ public:
         std::function<int(std::string&)> fp_s3select_result_format,
         std::function<int(std::string&)> fp_s3select_header_format)
   {
-    int status = INITIAL_STAT;
-
+	m_sql_processing_status = Status::INITIAL_STAT;
     do
     {
       try
       {
-        status = getMatchRow(result);
+        getMatchRow(result);
       }
       catch (base_s3select_exception &e)
       {
@@ -2664,27 +2693,28 @@ public:
       {//AWS-cli limits response size the following callbacks send response upon some threshold
         fp_s3select_result_format(result);
 
-        if (!is_end_of_stream())
+        if (!is_end_of_stream() && (get_sql_processing_status() != Status::LIMIT_REACHED))
         {
           fp_s3select_header_format(result);
         }
       }
       else
       {
-        if (is_end_of_stream())
+        if (is_end_of_stream() || (get_sql_processing_status() == Status::LIMIT_REACHED))
         {
           fp_s3select_result_format(result);
         }
       }
 
-      if (status == END_OF_STREAM || is_end_of_stream() || status == LIMIT_REACHED)
+      //TODO is_end_of_stream() required?
+      if (get_sql_processing_status() == Status::END_OF_STREAM || is_end_of_stream() || get_sql_processing_status() == Status::LIMIT_REACHED)
       {
         break;
       }
 
     } while (1);
 
-    return status;
+    return 0;
   }
 
   void load_meta_data_into_scratch_area()
@@ -2732,15 +2762,19 @@ private:
   JsonParserHandler JsonHandler;
   size_t m_processed_bytes;
   bool m_end_of_stream;
-  std::string s3select_result;
+  std::string* m_s3select_result = nullptr;
   size_t m_row_count;
   bool star_operation_ind;
   std::string m_error_description;
+  bool m_init_json_processor_ind;
 
 public:
 
-  void set_json(s3select* query)
+  void init_json_processor(s3select* query)
   {
+    if(m_init_json_processor_ind)
+	    return;
+
     std::function<int(void)> f_sql = [this](void){auto res = sql_execution_on_row_cb();return res;};
     std::function<int(s3selectEngine::value&, int)> 
       f_push_to_scratch = [this](s3selectEngine::value& value,int json_var_idx){return push_into_scratch_area_cb(value,json_var_idx);};
@@ -2784,14 +2818,20 @@ public:
     }
 
     m_sa->set_parquet_type();//TODO json type
+    m_init_json_processor_ind = true;
   }
     
-  json_object(s3select* query):base_s3object(query),m_processed_bytes(0),m_end_of_stream(false),m_row_count(0),star_operation_ind(false)
+  json_object(s3select* query):base_s3object(query),m_processed_bytes(0),m_end_of_stream(false),m_row_count(0),star_operation_ind(false),m_init_json_processor_ind(false)
   {
-    set_json(query);
+    init_json_processor(query);
   }
 
-json_object(): base_s3object(nullptr), m_processed_bytes(0),m_end_of_stream(false),m_row_count(0),star_operation_ind(false) {}
+  void set_sql_result(std::string& sql_result)
+  {
+	m_s3select_result = &sql_result; 
+  }
+
+  json_object(): base_s3object(nullptr), m_processed_bytes(0),m_end_of_stream(false),m_row_count(0),star_operation_ind(false),m_init_json_processor_ind(false) {}
 
 private:
 
@@ -2810,23 +2850,28 @@ private:
       //execute statement on row 
       //create response (TODO callback)
 
-      size_t result_len = s3select_result.size();
-      int status = INITIAL_STAT;
+      size_t result_len = m_s3select_result->size();
+      int status=0;
       try{
-	status = getMatchRow(s3select_result);
+	getMatchRow(*m_s3select_result);
       }
       catch(s3selectEngine::base_s3select_exception& e)
       {
-	sql_error_handling(e,s3select_result);
+	sql_error_handling(e,*m_s3select_result);
 	status = -1;
       }
 
+      if(is_sql_limit_reached()) 
+      {
+	      status = JSON_PROCESSING_LIMIT_REACHED;//returning number since sql_execution_on_row_cb is a callback; the caller can not access the object
+      }
+
       m_sa->clear_data(); 
-      if(star_operation_ind && (s3select_result.size() != result_len))
+      if(star_operation_ind && (m_s3select_result->size() != result_len))
       {//as explained above the star-operation is displayed differently
 	std::string end_of_row;
 	end_of_row = "#=== " + std::to_string(m_row_count++) + " ===#\n";
-	s3select_result.append(end_of_row);
+	m_s3select_result->append(end_of_row);
       }
       return status;
   }
@@ -2851,10 +2896,10 @@ private:
     //the error-handling takes care of the error flow.
     m_error_description = e.what();
     m_error_count++;
-    s3select_result.append(std::to_string(m_error_count));
-    s3select_result += " : ";
-    s3select_result.append(m_error_description);
-    s3select_result += m_csv_defintion.output_row_delimiter;
+    m_s3select_result->append(std::to_string(m_error_count));
+    *m_s3select_result += " : ";
+    m_s3select_result->append(m_error_description);
+    *m_s3select_result += m_csv_defintion.output_row_delimiter;
   }
 
 public:
@@ -2863,32 +2908,31 @@ public:
   {
     int status=0;
     m_processed_bytes += stream_length;
-    s3select_result.clear();
+    set_sql_result(result);
 
     if(!stream_length || !json_stream)//TODO m_processed_bytes(?)
     {//last processing cycle
       JsonHandler.process_json_buffer(0, 0, true);//TODO end-of-stream = end-of-row
       m_end_of_stream = true;
       sql_execution_on_row_cb();
-      result = s3select_result;
       return 0;
     }
 
     try{
     //the handler is processing any buffer size and return results per each buffer
       status = JsonHandler.process_json_buffer((char*)json_stream, stream_length);
-      result = s3select_result;//TODO remove this result copy
     }
     catch(std::exception &e)
     {
-      std::cout << "failure while processing " << e.what() << std::endl;
+	std::string error_description = std::string("exception while processing :") + e.what();
+	throw base_s3select_exception(error_description,base_s3select_exception::s3select_exp_en_t::FATAL);
     }
 
     if(status<0)
     {
-     //TODO error handling
-     std::cout << "failure upon JSON processing" << std::endl;
-     return -1;
+    	std::string error_description = std::string("failure upon JSON processing");
+    	throw base_s3select_exception(error_description,base_s3select_exception::s3select_exp_en_t::FATAL);
+	return -1;
     }
  
     return status; 
@@ -2896,10 +2940,8 @@ public:
 
   void set_json_query(s3select* s3_query)
   {
-    
     set_base_defintions(s3_query);
-
-    set_json(s3_query);
+    init_json_processor(s3_query);
   }
 
   std::string get_error_description()
