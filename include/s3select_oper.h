@@ -116,7 +116,7 @@ class base_statement;
 //typedef std::vector<base_statement *> bs_stmt_vec_t; //without specific allocator
 
 //ChunkAllocator, prevent allocation from heap.
-typedef std::vector<base_statement*, ChunkAllocator<base_statement*, 256> > bs_stmt_vec_t;
+typedef std::vector<base_statement*, ChunkAllocator<base_statement*, 4096> > bs_stmt_vec_t;
 
 class base_s3select_exception : public std::exception
 {
@@ -436,6 +436,9 @@ private:
   std::string m_str_value;
   //std::basic_string<char,std::char_traits<char>,ChunkAllocator<char,256>> m_str_value;
 
+  int32_t m_precision=-1;
+  int32_t m_scale=-1;
+
 public:
   enum class value_En_t
   {
@@ -556,6 +559,18 @@ public:
     type = value_En_t::S3NULL;
   }
 
+  void set_precision_scale(int32_t* precision, int32_t* scale)
+  {
+    m_precision = *precision;
+    m_scale = *scale;
+  }
+
+  void get_precision_scale(int32_t* precision, int32_t* scale)
+  {
+    *precision = m_precision;
+    *scale = m_scale;
+  }
+
   void set_string_nocopy(char* str)
   {//purpose: value does not own the string
      __val.str = str;
@@ -591,7 +606,16 @@ public:
       }
       else if(type == value_En_t::FLOAT)
       {
-        m_to_string = boost::lexical_cast<std::string>(__val.dbl);
+        if(m_precision != -1 && m_scale != -1)
+        {
+          std::stringstream ss;
+          ss << std::fixed << std::setprecision(m_scale) << __val.dbl;
+          m_to_string = ss.str();
+        }
+        else
+        {
+          m_to_string.assign( boost::lexical_cast<std::string>(__val.dbl) );
+        }
       }
       else if (type == value_En_t::TIMESTAMP)
       {
@@ -941,8 +965,14 @@ public:
     if (lhs.is_nan() || rhs.is_nan())
     {
       return false;
-    }  
+    }
 
+//  in the case of NULL on right-side or NULL on left-side, the result is false.
+    if(lhs.is_null() || rhs.is_null())
+    {
+      return false;
+    }
+    
     throw base_s3select_exception("operands not of the same type(numeric , string), while comparision");
   }
   bool operator<=(const value& v)
@@ -1145,6 +1175,12 @@ public:
   void update(std::vector<char*>& tokens, size_t num_of_tokens)
   {
     size_t i=0;
+    //increase the Vector::m_schema_values capacity(it should happen few times)
+    if ((*m_schema_values).capacity() < tokens.size())
+    {
+	  (*m_schema_values).resize( tokens.size() * 2 );
+    }
+
     for(auto s : tokens)
     {
       if (i>=num_of_tokens)
@@ -1199,6 +1235,13 @@ public:
     {
       max_json_idx = json_idx;
     }
+
+    //increase the Vector::m_schema_values capacity(it should happen few times)
+    if ((*m_schema_values).capacity() < static_cast<unsigned long long>(max_json_idx))
+    {
+	  (*m_schema_values).resize(max_json_idx * 2);
+    }
+
     (*m_schema_values)[ json_idx ] = v;
 
     if(json_idx>m_upper_bound)
@@ -1220,6 +1263,12 @@ public:
     parquet_file_parser::column_pos_t::iterator column_pos_iter = column_positions.begin();
     m_upper_bound =0;
     buff_loc=0;
+
+    //increase the Vector::m_schema_values capacity(it should happen few times)
+    if ((*m_schema_values).capacity() < parquet_row_value.size())
+    {
+	  (*m_schema_values).resize(parquet_row_value.size() * 2);
+    }
 
     for(auto v : parquet_row_value)
     {
@@ -1294,13 +1343,25 @@ protected:
   value value_na;
   //JSON queries has different syntax from other data-sources(Parquet,CSV)
   bool m_json_statement;
+  uint64_t number_of_calls = 0;
+  std::string operator_name;
 
 public:
   base_statement():m_scratch(nullptr), is_last_call(false), m_is_cache_result(false),
   m_projection_alias(nullptr), m_eval_stack_depth(0), m_skip_non_aggregate_op(false),m_json_statement(false) {}
 
+  void set_operator_name(const char* op)
+  {
+#ifdef S3SELECT_PROF
+    operator_name = op;
+#endif
+  }
+
   virtual value& eval()
   {
+#ifdef S3SELECT_PROF
+    number_of_calls++;
+#endif
     //purpose: on aggregation flow to run only the correct subtree(aggregation subtree)
      
     if (m_skip_non_aggregate_op == false)
@@ -1460,7 +1521,12 @@ public:
     return m_eval_stack_depth;
   }
 
-  virtual ~base_statement() {}
+  virtual ~base_statement()  
+{
+#ifdef S3SELECT_PROF 
+std::cout<< operator_name << ":" << number_of_calls <<std::endl; 
+#endif
+}
 
   void dtor()
   {
@@ -1504,20 +1570,22 @@ private:
 
   const int undefined_column_pos = -1;
   const int column_alias = -2;
+  const char* this_operator_name = "variable";
 
 public:
-  variable():m_var_type(var_t::NA), _name(""), column_pos(-1), json_variable_idx(-1) {}
+  variable():m_var_type(var_t::NA), _name(""), column_pos(-1), json_variable_idx(-1){set_operator_name(this_operator_name);}
 
-  explicit variable(int64_t i) : m_var_type(var_t::COLUMN_VALUE), column_pos(-1), var_value(i), json_variable_idx(-1) {}
+  explicit variable(int64_t i) : m_var_type(var_t::COLUMN_VALUE), column_pos(-1), var_value(i), json_variable_idx(-1){set_operator_name(this_operator_name);}
 
-  explicit variable(double d) : m_var_type(var_t::COLUMN_VALUE), _name("#"), column_pos(-1), var_value(d), json_variable_idx(-1) {}
+  explicit variable(double d) : m_var_type(var_t::COLUMN_VALUE), _name("#"), column_pos(-1), var_value(d), json_variable_idx(-1){set_operator_name(this_operator_name);}
 
-  explicit variable(int i) : m_var_type(var_t::COLUMN_VALUE), column_pos(-1), var_value(i), json_variable_idx(-1) {}
+  explicit variable(int i) : m_var_type(var_t::COLUMN_VALUE), column_pos(-1), var_value(i), json_variable_idx(-1){set_operator_name(this_operator_name);}
 
-  explicit variable(const std::string& n) : m_var_type(var_t::VARIABLE_NAME), _name(n), column_pos(-1), json_variable_idx(-1) {}
+  explicit variable(const std::string& n) : m_var_type(var_t::VARIABLE_NAME), _name(n), column_pos(-1), json_variable_idx(-1){set_operator_name(this_operator_name);}
 
   explicit variable(const std::string& n, var_t tp, size_t json_idx) : m_var_type(var_t::NA)
   {//only upon JSON use case
+    set_operator_name(this_operator_name);
     if(tp == variable::var_t::JSON_VARIABLE)
     {
       m_var_type = variable::var_t::JSON_VARIABLE;
@@ -1528,6 +1596,7 @@ public:
 
   variable(const std::string& n,  var_t tp) : m_var_type(var_t::NA)
   {
+    set_operator_name(this_operator_name);
     if(tp == variable::var_t::POS)
     {
       _name = n;
@@ -1552,6 +1621,7 @@ public:
 
   explicit variable(s3select_reserved_word::reserve_word_en_t reserve_word)
   {
+    set_operator_name(this_operator_name);
     if (reserve_word == s3select_reserved_word::reserve_word_en_t::S3S_NULL)
     {
       m_var_type = variable::var_t::COLUMN_VALUE;
@@ -1618,6 +1688,11 @@ public:
   void set_null()
   {
     var_value.setnull();
+  }
+
+  void set_precision_scale(int32_t* p, int32_t* s)
+  {
+    var_value.set_precision_scale(p, s);
   }
 
   virtual ~variable() {}
@@ -1752,8 +1827,9 @@ public:
     {
       m_scratch->get_column_value(column_pos,var_value);
       //in the case of successive column-delimiter {1,some_data,,3}=> third column is NULL 
-      if (var_value.is_string() && (var_value.str()== 0 || (var_value.str() && *var_value.str()==0)))
+      if (var_value.is_string() && (var_value.str()== 0 || (var_value.str() && *var_value.str()==0))){
           var_value.setnull();//TODO is it correct for Parquet
+      }
     }
 
     return var_value;
@@ -1813,10 +1889,13 @@ public:
 
   virtual value& eval_internal()
   {
-    if ((l->eval()).is_null()) {
+    value l_val = l->eval();
+    value r_val;
+    if (l_val.is_null()) {
         var_value.setnull();
         return var_value;
-      } else if((r->eval()).is_null()) {
+      } else {r_val = r->eval();}
+        if(r_val.is_null()) {
         var_value.setnull();
         return var_value;
       }
@@ -1824,27 +1903,27 @@ public:
     switch (_cmp)
     {
     case cmp_t::EQ:
-      return var_value =  bool( (l->eval() == r->eval()) ^ negation_result );
+      return var_value =  bool( (l_val == r_val) ^ negation_result );
       break;
 
     case cmp_t::LE:
-      return var_value = bool( (l->eval() <= r->eval()) ^ negation_result );
+      return var_value = bool( (l_val <= r_val) ^ negation_result );
       break;
 
     case cmp_t::GE:
-      return var_value = bool( (l->eval() >= r->eval()) ^ negation_result );
+      return var_value = bool( (l_val >= r_val) ^ negation_result );
       break;
 
     case cmp_t::NE:
-      return var_value = bool( (l->eval() != r->eval()) ^ negation_result );
+      return var_value = bool( (l_val != r_val) ^ negation_result );
       break;
 
     case cmp_t::GT:
-      return var_value = bool( (l->eval() > r->eval()) ^ negation_result );
+      return var_value = bool( (l_val > r_val) ^ negation_result );
       break;
 
     case cmp_t::LT:
-      return var_value = bool( (l->eval() < r->eval()) ^ negation_result );
+      return var_value = bool( (l_val < r_val) ^ negation_result );
       break;
 
     default:
@@ -1853,7 +1932,7 @@ public:
     }
   }
 
-  arithmetic_operand(base_statement* _l, cmp_t c, base_statement* _r):l(_l), r(_r), _cmp(c),negation_result(false) {}
+  arithmetic_operand(base_statement* _l, cmp_t c, base_statement* _r):l(_l), r(_r), _cmp(c),negation_result(false){set_operator_name("arithmetic_operand");}
   
   explicit arithmetic_operand(base_statement* p)//NOT operator 
   {
@@ -1898,7 +1977,7 @@ public:
     return true;
   }
 
-  logical_operand(base_statement* _l, oplog_t _o, base_statement* _r):l(_l), r(_r), _oplog(_o),negation_result(false) {}
+  logical_operand(base_statement* _l, oplog_t _o, base_statement* _r):l(_l), r(_r), _oplog(_o),negation_result(false){set_operator_name("logical_operand");}
 
   explicit logical_operand(base_statement * p)//NOT operator
   {
@@ -2035,7 +2114,7 @@ public:
     }
   }
 
-  mulldiv_operation(base_statement* _l, muldiv_t c, base_statement* _r):l(_l), r(_r), _mulldiv(c) {}
+  mulldiv_operation(base_statement* _l, muldiv_t c, base_statement* _r):l(_l), r(_r), _mulldiv(c){set_operator_name("mulldiv_operation");}
 
   virtual ~mulldiv_operation() {}
 };
@@ -2118,7 +2197,7 @@ class negate_function_operation : public base_statement
   
   public:
 
-  explicit negate_function_operation(base_statement *f):function_to_negate(f){}
+  explicit negate_function_operation(base_statement *f):function_to_negate(f){set_operator_name("negate_function_operation");}
 
   virtual std::string print(int ident)
   {
