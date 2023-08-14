@@ -1144,7 +1144,7 @@ public:
   json_star_op_cont_t m_json_star_operation;
 
   scratch_area():m_upper_bound(-1),parquet_type(false),buff_loc(0),max_json_idx(-1)
-  {//TODO it should resize dynamicly
+  {
     m_schema_values = new std::vector<value>(128,value(nullptr));
   }
 
@@ -1215,12 +1215,22 @@ public:
   }
 
   void get_column_value(uint16_t column_pos, value &v)
-  {// TODO handle out of boundaries
+  {
+    if (column_pos > ((*m_schema_values).size()-1))
+    {
+      throw base_s3select_exception("accessing scratch buffer beyond its size");
+    }
+
     v = (*m_schema_values)[ column_pos ];
   }
 
   value* get_column_value(uint16_t column_pos)
   {
+    if (column_pos > ((*m_schema_values).size()-1))
+    {
+      throw base_s3select_exception("accessing scratch buffer beyond its size");
+    }
+
     return &(*m_schema_values)[ column_pos ];
   }
   
@@ -1268,6 +1278,11 @@ public:
     if ((*m_schema_values).capacity() < parquet_row_value.size())
     {
 	  (*m_schema_values).resize(parquet_row_value.size() * 2);
+    }
+
+    if (*column_pos_iter > ((*m_schema_values).size()-1))
+    {
+      throw base_s3select_exception("accessing scratch buffer beyond its size");
     }
 
     for(auto v : parquet_row_value)
@@ -2245,6 +2260,7 @@ public:
   //TODO add semantic to base-function , it operate once on function creation
   // validate semantic on creation instead on run-time
   virtual bool operator()(bs_stmt_vec_t* args, variable* result) = 0;
+  std::string m_function_name;
   base_function() : aggregate(false) {}
   bool is_aggregate() const
   {
@@ -2259,6 +2275,27 @@ public:
     this->~base_function();
   }
 
+  void check_args_size(bs_stmt_vec_t* args, uint16_t required, const char* error_msg)
+  {//verify for atleast required parameters
+    if(args->size() < required)
+    {
+      throw base_s3select_exception(error_msg,base_s3select_exception::s3select_exp_en_t::FATAL);
+    }
+  }
+
+  void check_args_size(bs_stmt_vec_t* args,uint16_t required)
+  {
+    if(args->size() < required)
+    {
+      std::string error_msg = m_function_name + " requires for " + std::to_string(required) + " arguments";
+      throw base_s3select_exception(error_msg,base_s3select_exception::s3select_exp_en_t::FATAL);
+    }
+  }
+
+  void set_function_name(const char* name)
+  {
+    m_function_name.assign(name);
+  }
 };
 
 class base_date_extract : public base_function
