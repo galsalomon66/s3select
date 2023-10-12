@@ -235,7 +235,8 @@ enum class s3select_func_En_t {ADD,
                                LEADING,
                                TRAILING,
                                DECIMAL_OPERATOR,
-                               CAST_TO_DECIMAL
+                               CAST_TO_DECIMAL,
+			       ENGINE_VERSION
                               };
 
 
@@ -306,7 +307,8 @@ private:
     {"#leading#", s3select_func_En_t::LEADING},
     {"#trailing#", s3select_func_En_t::TRAILING},
     {"#decimal_operator#", s3select_func_En_t::DECIMAL_OPERATOR},
-    {"#cast_as_decimal#", s3select_func_En_t::CAST_TO_DECIMAL}
+    {"#cast_as_decimal#", s3select_func_En_t::CAST_TO_DECIMAL},
+    {"engine_version", s3select_func_En_t::ENGINE_VERSION}
 
   };
 
@@ -517,9 +519,10 @@ struct _fn_sum : public base_function
 
   value sum;
 
-  _fn_sum() : sum(0)
+  _fn_sum()
   {
     aggregate = true;
+    sum.setnull();
   }
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
@@ -531,6 +534,10 @@ struct _fn_sum : public base_function
 
     try
     {
+      if(sum.is_null())
+      {
+	sum = 0;
+      }
       sum = sum + x->eval();
     }
     catch (base_s3select_exception& e)
@@ -618,7 +625,9 @@ struct _fn_avg : public base_function
     void get_aggregate_result(variable *result) override
     {
         if(count == static_cast<value>(0)) {
-            throw base_s3select_exception("count cannot be zero!");
+            value v_null;
+	    v_null.setnull();
+            *result=v_null;
         } else {
             *result = sum/count ;
         }
@@ -630,9 +639,10 @@ struct _fn_min : public base_function
 
   value min;
 
-  _fn_min():min(__INT64_MAX__)
+  _fn_min()
   {
     aggregate=true;
+    min.setnull();
   }
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
@@ -642,7 +652,7 @@ struct _fn_min : public base_function
     auto iter = args->begin();
     base_statement* x =  *iter;
 
-    if(min > x->eval())
+    if(min.is_null() || min > x->eval())
     {
       min=x->eval();
     }
@@ -662,9 +672,10 @@ struct _fn_max : public base_function
 
   value max;
 
-  _fn_max():max(-__INT64_MAX__)
+  _fn_max()
   {
     aggregate=true;
+    max.setnull();
   }
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
@@ -674,7 +685,7 @@ struct _fn_max : public base_function
     auto iter = args->begin();
     base_statement* x =  *iter;
 
-    if(max < x->eval())
+    if(max.is_null() || max < x->eval())
     {
       max=x->eval();
     }
@@ -694,7 +705,7 @@ struct _fn_to_int : public base_function
   value var_result;
 
   bool operator()(bs_stmt_vec_t* args, variable* result) override
-  {
+  { 
     check_args_size(args,1);
 
     value v = (*args->begin())->eval();
@@ -2182,6 +2193,32 @@ struct _fn_decimal_operator : public base_function {
   }
 };
 
+struct _fn_engine_version : public base_function {
+
+  const char* version_description =R"(PR #137 : 
+the change handle the use cases where the JSON input starts with an anonymous array/object this may cause wrong search result per the user request(SQL statement) 
+
+handle the use-case where the user requests a json-key-path that may point to a non-discrete value. i.e. array or an object. 
+editorial changes.
+
+fix for CSV flow, in the case of a "broken row" (upon processing stream of data) 
+
+null results upon aggregation functions on an empty group (no match for where clause).
+)";
+
+
+  _fn_engine_version()
+  {
+    aggregate = true;
+  }
+
+  bool operator()(bs_stmt_vec_t* args, variable* result) override
+  {
+    result->set_value(version_description);
+    return true;
+  }
+};
+
 base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt_vec_t &arguments)
 {
   const FunctionLibrary::const_iterator iter = m_functions_library.find(fn_name.data());
@@ -2417,6 +2454,10 @@ base_function* s3select_functions::create(std::string_view fn_name,const bs_stmt
 
   case  s3select_func_En_t::CAST_TO_DECIMAL:
     return S3SELECT_NEW(this,_fn_cast_to_decimal);
+    break;
+
+  case  s3select_func_En_t::ENGINE_VERSION:
+    return S3SELECT_NEW(this,_fn_engine_version);
     break;
 
   default:
