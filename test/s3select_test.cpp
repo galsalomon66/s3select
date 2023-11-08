@@ -880,7 +880,10 @@ void test_single_column_single_row(const char* input_query,const char* expected_
       {
 	  ASSERT_TRUE(false);
       }
-      ASSERT_EQ(s3_csv_object.get_error_description(),error_description);
+      if(s3_csv_object.get_error_description().find(error_description) == std::string::npos )
+      {	
+	FAIL() << "getting error: " << s3_csv_object.get_error_description() << " instead of: " << error_description << std::endl;
+      }
       return;
     }
 
@@ -2122,6 +2125,13 @@ test_single_column_single_row( "select \"true\" from stdin where nullif(1,1) is 
 TEST(TestS3selectFunctions, isnullnot)
 {
 test_single_column_single_row( "select \"true\" from stdin where not nullif(1,2) is null;" ,"true\n");
+}
+
+TEST(TestS3selectFunctions, case_insensitive_not_null)
+{
+test_single_column_single_row( "select \"false\" from stdin where nullif(1,1) is NOT null;" ,"");
+test_single_column_single_row( "select \"false\" from stdin where nullif(1,1) is not Null;" ,"");
+test_single_column_single_row( "select \"true\" from stdin where nullif(1,1) is  Null;" ,"true\n");
 }
 
 TEST(TestS3selectFunctions, isnull1)

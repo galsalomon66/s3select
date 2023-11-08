@@ -350,6 +350,7 @@ private:
   s3select_functions* m_s3select_functions;
   variable m_result;
   bool m_is_aggregate_function;
+  value eval_result;
 
   void _resolve_name()
   {
@@ -437,14 +438,28 @@ public:
     {//all rows prior to last row
       if(m_skip_non_aggregate_op == false || is_aggregate() == true)
       {
-        (*m_func_impl)(&arguments, &m_result);
+	try {
+	  (*m_func_impl)(&arguments, &m_result);
+	}
+	catch(std::exception& e)
+	{
+	  std::string error_msg = "[" + m_func_impl->m_function_name + " failed : " + std::string(e.what()) + "]"; 
+	  throw base_s3select_exception(error_msg.data(), base_s3select_exception::s3select_exp_en_t::FATAL);
+	}
       }
       else if(m_skip_non_aggregate_op == true)
       {
         for(auto& p : arguments)
         {//evaluating the arguments (not the function itself, which is a non-aggregate function)
 	 //i.e. in the following use case substring( , sum(),count() ) ; only sum() and count() are evaluated.
-          p->eval();
+	  try {
+	    p->eval();
+	  }
+	  catch(std::exception& e)
+	  {
+	  std::string error_msg = m_func_impl->m_function_name + " failed : " + std::string(e.what());
+	  throw base_s3select_exception(error_msg.data(), base_s3select_exception::s3select_exp_en_t::FATAL);
+	  }
         }
       }
     }
@@ -452,9 +467,27 @@ public:
     {//on the last row, the aggregate function is finalized, 
      //and non-aggregate function is evaluated with the result of aggregate function.
       if(is_aggregate())
-        (*m_func_impl).get_aggregate_result(&m_result);
+      {
+	try{
+	  (*m_func_impl).get_aggregate_result(&m_result);
+	}
+	catch(std::exception& e)
+	{
+	  std::string error_msg = m_func_impl->m_function_name + " failed : " + std::string(e.what());
+	  throw base_s3select_exception(error_msg.data(), base_s3select_exception::s3select_exp_en_t::FATAL);
+	}
+      }
       else
-        (*m_func_impl)(&arguments, &m_result);
+      {
+	try{
+	  (*m_func_impl)(&arguments, &m_result);
+	}
+	catch(std::exception& e)
+	{
+	  std::string error_msg = m_func_impl->m_function_name + " failed : " + std::string(e.what());
+	  throw base_s3select_exception(error_msg.data(), base_s3select_exception::s3select_exp_en_t::FATAL);
+	}
+      }
     }
 
     return m_result.get_value();
@@ -2195,17 +2228,9 @@ struct _fn_decimal_operator : public base_function {
 
 struct _fn_engine_version : public base_function {
 
-  const char* version_description =R"(PR #137 : 
-the change handle the use cases where the JSON input starts with an anonymous array/object this may cause wrong search result per the user request(SQL statement) 
-
-handle the use-case where the user requests a json-key-path that may point to a non-discrete value. i.e. array or an object. 
-editorial changes.
-
-fix for CSV flow, in the case of a "broken row" (upon processing stream of data) 
-
-null results upon aggregation functions on an empty group (no match for where clause).
+  const char* version_description =R"(PR #141 : 
+add exception handling to avoid crashes, and produce informative messages instead
 )";
-
 
   _fn_engine_version()
   {

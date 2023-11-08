@@ -1633,8 +1633,10 @@ void push_like_predicate_escape::builder(s3select* self, const char* a, const ch
 
 void push_is_null_predicate::builder(s3select* self, const char* a, const char* b) const
 {
-    //expression is null, is not null 
+  //expression could be is null OR is not null 
   std::string token(a, b);
+  //to_lower enable case insensitive 
+  boost::algorithm::to_lower(token);
   bool is_null = true;
 
   for(size_t i=0;i<token.size();i++)
@@ -2185,6 +2187,7 @@ protected:
 
 public:
   s3select_csv_definitions m_csv_defintion;//TODO add method for modify
+  std::string m_error_description;
 
   enum class Status {
     END_OF_STREAM,
@@ -2195,6 +2198,16 @@ public:
   };
 
   Status m_sql_processing_status;
+
+  void set_processing_time_error()
+  {
+    m_sql_processing_status = Status::SQL_ERROR;
+  }
+
+  bool is_processing_time_error()
+  {
+    return m_sql_processing_status == Status::SQL_ERROR;
+  }
 
   Status get_sql_processing_status()
   {
@@ -2277,19 +2290,33 @@ public:
 
     for(auto& res : projections_resuls.values)
     {
+
+  	    std::string column_result;
+
+	    try{
+	      column_result = res->to_string();
+	    }
+	    catch(std::exception& e)
+	    {
+		column_result = "{failed to compute projection: " + std::string(e.what()) + "}";
+		m_error_description = column_result;
+		set_processing_time_error();
+	    }
+	    
+      
 	    if(fp_ext_debug_mesg)
-		      fp_ext_debug_mesg( res->to_string() );
+		      fp_ext_debug_mesg(column_result.data());
 
             if (m_csv_defintion.quote_fields_always) {
               std::ostringstream quoted_result;
-              quoted_result << std::quoted(res->to_string(),m_csv_defintion.output_quot_char, m_csv_defintion.escape_char);
+              quoted_result << std::quoted(column_result,m_csv_defintion.output_quot_char, m_csv_defintion.escape_char);
               result.append(quoted_result.str());
 	      m_returned_bytes_size += quoted_result.str().size();
             }//TODO to add asneeded
 	    else
 	    {
-            	result.append(res->to_string());
-		m_returned_bytes_size += strlen(res->to_string());
+            	result.append(column_result);
+		m_returned_bytes_size += column_result.size();
 	    }
 
             if(!m_csv_defintion.redundant_column) {
@@ -2336,7 +2363,7 @@ public:
             }
 
           result_values_to_string(projections_resuls,result);
-          return m_sql_processing_status = Status::END_OF_STREAM;
+	  return is_processing_time_error() ? (m_sql_processing_status = Status::SQL_ERROR) : (m_sql_processing_status = Status::END_OF_STREAM);
         }
 
         m_processed_rows++;
@@ -2370,7 +2397,7 @@ public:
 	    projections_resuls.push_value( &(i->eval()) );
 	  }
 	  result_values_to_string(projections_resuls,result);
-	  return m_sql_processing_status = Status::LIMIT_REACHED;
+	  return is_processing_time_error() ? (m_sql_processing_status = Status::SQL_ERROR) : (m_sql_processing_status = Status::LIMIT_REACHED);
         }
       }
       while (multiple_row_processing());
@@ -2423,10 +2450,15 @@ public:
 	  projections_resuls.push_value( &(i->eval()) );
 	}
 	result_values_to_string(projections_resuls,result);
+	if(m_sql_processing_status == Status::SQL_ERROR)
+	{
+	  return m_sql_processing_status; 
+	}
       }
 
     }
-    return is_end_of_stream() ? (m_sql_processing_status = Status::END_OF_STREAM) : (m_sql_processing_status = Status::NORMAL_EXIT);
+    return is_processing_time_error() ? (m_sql_processing_status = Status::SQL_ERROR) : 
+	    (is_end_of_stream() ? (m_sql_processing_status = Status::END_OF_STREAM) : (m_sql_processing_status = Status::NORMAL_EXIT));
     
   }//getMatchRow
 
@@ -2484,7 +2516,6 @@ public:
 
 private:
   bool m_skip_last_line;
-  std::string m_error_description;
   char* m_stream;
   char* m_end_stream;
   std::vector<char*> m_row_tokens;
@@ -2624,6 +2655,11 @@ public:
       m_error_description = "with_file_line failure while csv parsing";
       return -1;
     }
+    catch(std::exception& e)
+    {
+     m_error_description = "error while processing CSV object : " + std::string(e.what());
+     return -1;
+    }
 
     return status;
   }
@@ -2634,7 +2670,7 @@ private:
     //purpose: the CSV data is "streaming", it may "cut" rows in the middle, in that case the "broken-line" is stores
     //for later, upon next chunk of data is streaming, the stored-line is merge with current broken-line, and processed.
     std::string tmp_buff;
-	
+    int status = 0;	
     m_processed_bytes += stream_length;
 
     m_skip_first_line = false;
@@ -2655,7 +2691,7 @@ private:
       m_skip_x_first_bytes = tmp_buff.size()+1;
 
       //processing the merged row (previous broken row)
-      run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
+      status = run_s3select_on_object(result, merge_line.c_str(), merge_line.length(), false, false, false);
     }
 
     if (stream_length && csv_stream[stream_length - 1] != m_csv_defintion.row_delimiter)
@@ -2676,7 +2712,8 @@ private:
       stream_length -= (m_last_line.length());
     }
 
-    return run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
+    status = run_s3select_on_object(result, csv_stream, stream_length, m_skip_first_line, m_previous_line, (m_processed_bytes >= obj_size));
+    return status;
   }
 
 public:
@@ -2745,6 +2782,10 @@ public:
       {
         break;//user should request for sql_processing_status
       }
+      if(m_sql_processing_status == Status::SQL_ERROR)
+      {
+	return -1;
+      }
 
     } while (true);
 
@@ -2764,7 +2805,6 @@ class parquet_object : public base_s3object
 {
 
 private:
-  std::string m_error_description;
   parquet_file_parser* object_reader;
   parquet_file_parser::column_pos_t m_where_clause_columns;
   parquet_file_parser::column_pos_t m_projections_columns;
@@ -2948,7 +2988,6 @@ private:
   std::string* m_s3select_result = nullptr;
   size_t m_row_count;
   bool star_operation_ind;
-  std::string m_error_description;
   bool m_init_json_processor_ind;
 
 public:
