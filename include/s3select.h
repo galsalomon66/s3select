@@ -2730,24 +2730,29 @@ public:
       m_error_description = "escaped_char_missing failure while csv parsing";
       return -1;
     }
-	catch(io::error::escaped_string_not_closed& err)
+    catch(io::error::escaped_string_not_closed& err)
     {
       m_error_description = "escaped_string_not_closed failure while csv parsing";
       return -1;
     }
-	catch(io::error::line_length_limit_exceeded& err)
+    catch(io::error::line_length_limit_exceeded& err)
     {
       m_error_description = "line_length_limit_exceeded failure while csv parsing";
       return -1;
     }
-	catch(io::error::with_file_name& err)
+    catch(io::error::missmatch_of_begin_end& err)
     {
-      m_error_description = "with_file_name failure while csv parsing";
+      m_error_description = "missmatch_of_begin_end failure while csv parsing" + std::string(err.what());
       return -1;
     }
-	catch(io::error::with_file_line& err)
+    catch(io::error::missmatch_end& err)
     {
-      m_error_description = "with_file_line failure while csv parsing";
+      m_error_description = "missmatch_end failure while csv parsing" + std::string(err.what());
+      return -1;
+    }
+    catch(io::error::with_file_name& err)
+    {
+      m_error_description = "with_file_name failure while csv parsing";
       return -1;
     }
     catch(std::exception& e)
